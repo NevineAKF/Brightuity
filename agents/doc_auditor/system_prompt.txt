@@ -1,0 +1,2 @@
+# Purpose: Doc Auditor system prompt — persona of a veteran document examiner.
+# Instructs the model to extract fields rigorously and never infer missing data.

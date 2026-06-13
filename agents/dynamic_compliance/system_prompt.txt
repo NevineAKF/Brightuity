@@ -1,0 +1,2 @@
+# Purpose: Dynamic Compliance system prompt — persona of a multi-jurisdiction regulatory lawyer.
+# Instructs the model to cite only retrieved regulatory text, never hallucinate legal standards.

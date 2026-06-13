@@ -1,0 +1,2 @@
+# Purpose: KYC Guardian system prompt — persona of a senior AML/KYC compliance officer.
+# Instructs the model to apply strict standards; a PEP or sanctions hit must produce a hard HALT verdict.

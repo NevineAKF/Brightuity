@@ -1,0 +1,3 @@
+# Purpose: Docker Compose — one container per agent + backend + two PostgreSQL instances.
+# Enforces Zone 1 isolation: DB1 container has no external network; agent containers in Zone 1 network only.
+# Populate in Phase 2 once Band SDK and all agent dependencies are confirmed.

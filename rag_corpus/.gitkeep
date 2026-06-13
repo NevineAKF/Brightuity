@@ -1,0 +1,3 @@
+# Purpose: RAG corpus directory — will hold real regulatory texts for the Dynamic Compliance agent.
+# Add: MiCA full text, 6AMLD, FCA PS19/22, VARA framework, FATF guidance.
+# These are read-only inputs; never modified by agents.

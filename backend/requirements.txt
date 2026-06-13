@@ -1,0 +1,12 @@
+# Brightuity backend dependencies — Phase 1 (JSON data source)
+# Pin exact versions before deploying to Vultr.
+
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+
+# Phase 2 additions (uncomment when adding DB1 PostgreSQL + auth):
+# asyncpg==0.29.0
+# sqlalchemy[asyncio]==2.0.31
+# python-jose[cryptography]==3.3.0
+# passlib[bcrypt]==1.7.4
+# python-dotenv==1.0.1

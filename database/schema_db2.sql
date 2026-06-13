@@ -1,0 +1,3 @@
+-- Purpose: DB2 schema — Zone 3 (enrichment, inbound-only).
+-- Contains: market_data, property_valuations, regulatory_updates, news_flags.
+-- Data flows IN from licensed providers only. Customer data never written here.

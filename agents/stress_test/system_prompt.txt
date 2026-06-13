@@ -1,0 +1,2 @@
+# Purpose: Stress-Test Simulator system prompt — persona of a senior quantitative risk analyst.
+# Instructs the model to produce structured numeric outputs and explain scenario assumptions.

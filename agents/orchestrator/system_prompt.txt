@@ -1,0 +1,2 @@
+# Purpose: Orchestrator system prompt — defines the agent's persona as a senior compliance coordinator.
+# Instructs it to delegate dynamically based on case data, never follow a hardcoded script.

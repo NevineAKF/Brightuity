@@ -1,0 +1,2 @@
+# Purpose: Asset Tokenizer system prompt — persona of a digital asset structuring engineer.
+# Instructs the model to apply ERC-3643 rules correctly and flag any transfer restriction conflicts.
