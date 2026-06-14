@@ -99,6 +99,9 @@ def _parse_verdict(raw: str) -> tuple[str, str, list[str]]:
     # Strip reasoning-model think blocks (Qwen3, DeepSeek-V4-Pro)
     text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
 
+    # Strip markdown code fences (some models wrap output in ```json ... ```)
+    text = re.sub(r"```(?:json)?", "", text).strip()
+
     # Extract the first complete JSON object — handles any surrounding text
     brace_start = text.find("{")
     brace_end = text.rfind("}") + 1

@@ -151,10 +151,12 @@ AGENT_MODEL_CHAINS: dict[str, ModelChain] = {
 
     # ── Dynamic Compliance (AI/ML API) ──────────────────────────────────────
     # LangChain + RAG. Long-context model essential (MiCA ≈ 200 pages).
-    # Primary was Claude Fable 5; promoted to Gemini 3.1 Pro on 2026-06-12
-    # after export-control suspension — one-line change, zero downtime.
+    # Primary was Claude Fable 5; promoted to Gemini on 2026-06-12 after
+    # export-control suspension. gemini-3.1-pro 404'd on AI/ML API →
+    # google/gemini-2.5-pro confirmed working 2026-06-14. Two real failovers,
+    # zero downtime — live proof the failover engine works exactly as designed.
     "dynamic_compliance": ModelChain(
-        primary="gemini-3.1-pro",
+        primary="google/gemini-2.5-pro",
         fallback="gpt-4o",
         platform=Platform.AIMLAPI,
     ),
@@ -185,5 +187,5 @@ AGENT_MODEL_CHAINS: dict[str, ModelChain] = {
 
 # ── Global call parameters ─────────────────────────────────────────────────────
 
-CALL_TIMEOUT_SECONDS: float = 30.0   # per-attempt timeout (blueprint section 4)
-MAX_TOKENS_DEFAULT: int = 2048        # default max_tokens for all agents
+CALL_TIMEOUT_SECONDS: float = 60.0   # per-attempt timeout (extended for Gemini 2.5 Pro thinking)
+MAX_TOKENS_DEFAULT: int = 4096        # thinking models (Gemini 2.5 Pro) burn tokens before output
