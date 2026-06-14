@@ -12,23 +12,20 @@ Public interface:
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 from pathlib import Path
 
 from shared.call_agent_model import ModelUnavailableError, call_agent_model
+from shared.schemas import DocAuditorVerdict
 
 logger = logging.getLogger(__name__)
 
-# Load system prompt once at import time (file is static)
 _SYSTEM_PROMPT: str = (
     Path(__file__).parent / "system_prompt.txt"
 ).read_text(encoding="utf-8")
 
 # Exact fields passed to the model. Everything else — including expected_outcome,
 # kyc_status, kyc_flags, risk_flags, source_of_funds — is deliberately excluded.
-# The field name is only used in _build_prompt(); this set documents intent.
 _DOC_FIELDS: frozenset[str] = frozenset({
     "request_id",
     "encrypted_doc_id",
@@ -82,54 +79,6 @@ def _build_prompt(client_record: dict) -> str:
     )
 
 
-# ── Response parsing ───────────────────────────────────────────────────────────
-
-def _parse_verdict(raw: str) -> tuple[str, str, list[str]]:
-    """
-    Parse the model's JSON response into (verdict, summary, issues_found).
-
-    Handles:
-    - <think>...</think> blocks from Qwen3/DeepSeek reasoning models
-    - Markdown code fences (```json ... ```)
-    - Leading/trailing prose around the JSON object
-    - Falls back to ("fail", error_message, ["json_parse_error"]) on bad output.
-    """
-    text = raw.strip()
-
-    # Strip reasoning-model think blocks (Qwen3, DeepSeek-V4-Pro)
-    text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
-
-    # Strip markdown code fences (some models wrap output in ```json ... ```)
-    text = re.sub(r"```(?:json)?", "", text).strip()
-
-    # Extract the first complete JSON object — handles any surrounding text
-    brace_start = text.find("{")
-    brace_end = text.rfind("}") + 1
-    if brace_start >= 0 and brace_end > brace_start:
-        text = text[brace_start:brace_end]
-
-    try:
-        data = json.loads(text)
-        verdict = str(data.get("verdict", "fail")).lower().strip()
-        if verdict not in ("pass", "fail"):
-            logger.warning("doc_auditor: unexpected verdict value %r — defaulting to fail", verdict)
-            verdict = "fail"
-        summary = str(data.get("summary", "")).strip() or "No summary provided."
-        issues_found = [str(i) for i in data.get("issues_found", [])]
-        return verdict, summary, issues_found
-
-    except (json.JSONDecodeError, ValueError, TypeError) as exc:
-        logger.warning(
-            "doc_auditor: JSON parse failed (%s). Raw response (first 400 chars): %.400s",
-            exc, raw,
-        )
-        return (
-            "fail",
-            "Parse error: model response was not valid JSON. Manual review required.",
-            ["json_parse_error"],
-        )
-
-
 # ── Public interface ───────────────────────────────────────────────────────────
 
 def audit_documents(client_record: dict) -> dict:
@@ -138,29 +87,24 @@ def audit_documents(client_record: dict) -> dict:
 
     Builds a prompt from document-relevant fields only (expected_outcome and
     KYC/risk fields are never passed to the model), calls call_agent_model
-    with the "doc_auditor" agent name (Qwen/Qwen3.6-27B → google/gemma-4-E4B-it
-    failover as configured in shared/config.py), and parses the JSON verdict.
+    with the DocAuditorVerdict schema, and returns the structured verdict dict.
 
-    Args:
-        client_record: One client dict from brightuity_clients.json (or DB1).
-                       The full record may contain any fields; only _DOC_FIELDS
-                       are extracted for the prompt.
+    The engine enforces the JSON contract (plain mode for Featherless/Qwen3).
+    No local parsing is needed — the engine's normalize+validate layer handles
+    <think> stripping and JSON extraction before returning a validated object.
 
     Returns:
-        Structured verdict dict compatible with ConsensusSigner.seal():
         {
             "agent":        "doc_auditor",
             "verdict":      "pass" | "fail",
             "summary":      str,
-            "issues_found": list[str],   # empty list when verdict is "pass"
+            "issues_found": list[str],
             "model_used":   str,
             "was_fallback": bool,
             "latency_ms":   int,
         }
 
-        On ModelUnavailableError (both primary and fallback exhausted), returns
-        a fail verdict with "model_unavailable" in issues_found so the
-        Orchestrator/Consensus Signer can detect the escalation condition.
+        On ModelUnavailableError: fail verdict with "model_unavailable" in issues_found.
     """
     request_id = client_record.get("request_id", "UNKNOWN")
     logger.info("doc_auditor: starting audit for %s", request_id)
@@ -168,16 +112,16 @@ def audit_documents(client_record: dict) -> dict:
     prompt = _build_prompt(client_record)
 
     try:
-        response = call_agent_model("doc_auditor", prompt, _SYSTEM_PROMPT)
-    except ModelUnavailableError as exc:
-        logger.error(
-            "doc_auditor: all models unavailable for %s — %s", request_id, exc
+        response = call_agent_model(
+            "doc_auditor", prompt, _SYSTEM_PROMPT, schema=DocAuditorVerdict
         )
+    except ModelUnavailableError as exc:
+        logger.error("doc_auditor: all models unavailable for %s — %s", request_id, exc)
         return {
             "agent": "doc_auditor",
             "verdict": "fail",
             "summary": (
-                f"All models unavailable (primary exhausted, fallback exhausted). "
+                "All models unavailable (primary exhausted, fallback exhausted). "
                 f"Escalating to human reviewer. Detail: {exc}"
             ),
             "issues_found": ["model_unavailable"],
@@ -186,22 +130,19 @@ def audit_documents(client_record: dict) -> dict:
             "latency_ms": 0,
         }
 
-    verdict, summary, issues_found = _parse_verdict(response.text)
+    data: DocAuditorVerdict = response.data
 
     logger.info(
         "doc_auditor: %s → verdict=%s model=%s fallback=%s latency_ms=%d",
-        request_id,
-        verdict,
-        response.model_used,
-        response.was_fallback,
-        response.latency_ms,
+        request_id, data.verdict, response.model_used,
+        response.was_fallback, response.latency_ms,
     )
 
     return {
         "agent": "doc_auditor",
-        "verdict": verdict,
-        "summary": summary,
-        "issues_found": issues_found,
+        "verdict": data.verdict,
+        "summary": data.summary,
+        "issues_found": data.issues_found,
         "model_used": response.model_used,
         "was_fallback": response.was_fallback,
         "latency_ms": response.latency_ms,

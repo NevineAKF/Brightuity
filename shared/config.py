@@ -82,10 +82,18 @@ class ModelChain:
     Both models run on the same platform. The only exception in the blueprint
     is KYC Guardian whose fallback crosses model families (Claude → GPT) but
     stays on the same platform (AI/ML API serves both).
+
+    json_mode is per-model, not per-agent — primary and fallback can differ.
+    Verified capability matrix (from structured-output probes, 2026-06-14):
+      "schema"  → response_format json_schema strict  (AI/ML API: all models ✓)
+      "object"  → response_format json_object         (Featherless: DeepSeek-V4 only ✓)
+      "plain"   → no response_format                  (Featherless: Qwen3, Kimi, GLM, Gemma)
     """
-    primary: str     # model ID string as expected by the platform's /v1 endpoint
-    fallback: str    # model ID used after two consecutive primary failures
-    platform: Platform
+    primary:            str      # model ID as expected by the platform's /v1 endpoint
+    fallback:           str      # model ID used after two consecutive primary failures
+    platform:           Platform
+    primary_json_mode:  str      # "schema" | "object" | "plain"
+    fallback_json_mode: str      # "schema" | "object" | "plain"
 
 
 # ── Platform registry ──────────────────────────────────────────────────────────
@@ -123,62 +131,70 @@ AGENT_MODEL_CHAINS: dict[str, ModelChain] = {
 
     # ── Orchestrator (AI/ML API) ────────────────────────────────────────────
     # CrewAI-based. Needs the strongest reasoning for dynamic case routing.
+    # Both Claude models on AI/ML API: json_schema strict confirmed ✓
     "orchestrator": ModelChain(
         primary="claude-opus-4-8",
         fallback="claude-sonnet-4-6",
         platform=Platform.AIMLAPI,
+        primary_json_mode="schema",
+        fallback_json_mode="schema",
     ),
 
     # ── Doc Auditor (Featherless) ───────────────────────────────────────────
     # First gate. Examines deeds, extracts fields, flags document issues.
-    # "Qwen 3.6" → Qwen/Qwen3.6-27B; "Gemma-4" → google/gemma-4-E4B-it.
-    # Verified non-gated on Featherless 2026-06-14.
+    # Qwen3.6-27B probe: json_object → EMPTY (stop); plain → clean JSON ✓
+    # Gemma-4-E4B-it: not probed; treat as plain (same platform behaviour).
     "doc_auditor": ModelChain(
         primary="Qwen/Qwen3.6-27B",
         fallback="google/gemma-4-E4B-it",
         platform=Platform.FEATHERLESS,
+        primary_json_mode="plain",
+        fallback_json_mode="plain",
     ),
 
     # ── KYC Guardian (AI/ML API) ────────────────────────────────────────────
-    # Most sensitive agent. Cross-family fallback (Claude → GPT) = platform
-    # redundancy: if Anthropic models degrade, OpenAI models take over.
-    # Both are served by AI/ML API — same endpoint, different model IDs.
+    # Most sensitive agent. Cross-family fallback (Claude → GPT) — both on
+    # AI/ML API, both confirmed json_schema strict ✓
     "kyc_guardian": ModelChain(
         primary="claude-opus-4-8",
         fallback="gpt-4o",
         platform=Platform.AIMLAPI,
+        primary_json_mode="schema",
+        fallback_json_mode="schema",
     ),
 
     # ── Dynamic Compliance (AI/ML API) ──────────────────────────────────────
-    # LangChain + RAG. Long-context model essential (MiCA ≈ 200 pages).
-    # Primary was Claude Fable 5; promoted to Gemini on 2026-06-12 after
-    # export-control suspension. gemini-3.1-pro 404'd on AI/ML API →
-    # google/gemini-2.5-pro confirmed working 2026-06-14. Two real failovers,
-    # zero downtime — live proof the failover engine works exactly as designed.
+    # RAG + long-context model. Both models on AI/ML API: json_schema strict ✓
+    # google/gemini-2.5-pro confirmed at 4096 tokens: clean JSON, no fences.
     "dynamic_compliance": ModelChain(
         primary="google/gemini-2.5-pro",
         fallback="gpt-4o",
         platform=Platform.AIMLAPI,
+        primary_json_mode="schema",
+        fallback_json_mode="schema",
     ),
 
     # ── Stress-Test Simulator (Featherless) ─────────────────────────────────
-    # Quantitative risk analysis: fair value, risk score 0-100, scenario stress.
-    # "DeepSeek-V4-Pro" → deepseek-ai/DeepSeek-V4-Pro (exact blueprint match).
-    # Verified non-gated on Featherless 2026-06-14.
+    # Quantitative risk analysis. DeepSeek-V4: json_object ✓ (json_schema 400s).
+    # Qwen3 fallback: json_object → EMPTY; plain → clean JSON ✓
     "stress_test": ModelChain(
         primary="deepseek-ai/DeepSeek-V4-Pro",
         fallback="Qwen/Qwen3.6-27B",
         platform=Platform.FEATHERLESS,
+        primary_json_mode="object",
+        fallback_json_mode="plain",
     ),
 
     # ── Asset Tokenizer (Featherless) ───────────────────────────────────────
-    # Designs ERC-3643 token structure: supply, unit price, transfer restrictions.
-    # "Kimi-K2.6" → moonshotai/Kimi-K2.6; "GLM 4.6" → zai-org/GLM-4.6.
-    # Verified non-gated on Featherless 2026-06-14.
+    # Designs ERC-3643 token structure.
+    # Kimi-K2.6: json_object → EMPTY; plain → clean JSON ✓
+    # GLM-4.6: not probed; treat as plain (same platform behaviour).
     "asset_tokenizer": ModelChain(
         primary="moonshotai/Kimi-K2.6",
         fallback="zai-org/GLM-4.6",
         platform=Platform.FEATHERLESS,
+        primary_json_mode="plain",
+        fallback_json_mode="plain",
     ),
 
     # consensus_signer is intentionally absent — it uses ECDSA, no LLM.
