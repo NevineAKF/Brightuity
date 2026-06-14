@@ -147,6 +147,9 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
+# RAG index — generated artifact, rebuild with: python rag_corpus/build_index.py
+rag_corpus/chroma_index/
+
 # Environments
 .env
 .envrc

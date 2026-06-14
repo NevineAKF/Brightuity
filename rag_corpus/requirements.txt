@@ -1,0 +1,12 @@
+# RAG corpus dependencies for the Dynamic Compliance agent.
+# Install: pip install -r rag_corpus/requirements.txt
+#
+# These run entirely offline inside Zone 1 — no external API calls at inference time.
+# The sentence-transformer model (all-MiniLM-L6-v2, ~22 MB) downloads once on first
+# use and is then cached locally by the sentence-transformers library.
+
+# Vector store — persistent, local, in-process (no server required)
+chromadb>=0.5.0
+
+# Embedding model — offline, CPU-friendly, no API key needed
+sentence-transformers>=2.7.0

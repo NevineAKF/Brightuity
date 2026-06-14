@@ -1,0 +1,152 @@
+[
+  {
+    "id": "amld5-scope-crypto",
+    "regulation": "Directive (EU) 2018/843 (AMLD5) amending Directive (EU) 2015/849 (AMLD4)",
+    "article": "AMLD5 Article 1(1) — Extension of scope to virtual asset service providers",
+    "jurisdiction": "EU",
+    "topic": "VASP AML scope — crypto-asset businesses as obliged entities",
+    "verbatim": false,
+    "source_note": "Faithful summary of AMLD5 amendment extending AMLD4 Article 2 scope",
+    "text": "AMLD5 explicitly extended the scope of EU anti-money laundering obligations to providers of exchange services between virtual currencies and fiat currencies, and to custodian wallet providers. These entities are designated 'obliged entities' subject to all CDD, EDD, suspicious transaction reporting (STR), and record-keeping obligations under AMLD. For banks operating Digital Assets and Tokenisation Divisions, the bank itself is already an obliged entity; any CASP-equivalent services offered in the RWA tokenisation context trigger full AML compliance obligations identical to those applied to traditional banking products. There is no regulatory exemption for crypto-specific activities within an otherwise regulated bank."
+  },
+  {
+    "id": "amld4-art-3-pep-definition",
+    "regulation": "Directive (EU) 2015/849 (AMLD4) as amended by AMLD5",
+    "article": "Article 3(9) — Definition: politically exposed person (PEP)",
+    "jurisdiction": "EU",
+    "topic": "PEP definition — who qualifies as politically exposed",
+    "verbatim": false,
+    "source_note": "Faithful summary of AMLD4 Article 3(9) as amended",
+    "text": "A 'politically exposed person' (PEP) means a natural person who is or who has been entrusted with prominent public functions. This includes: heads of state, heads of government, ministers and deputy or assistant ministers; members of parliament or similar legislative bodies; members of the governing bodies of political parties; members of supreme courts, constitutional courts, or other high-level judicial bodies; members of courts of auditors or the boards of central banks; ambassadors, chargés d'affaires, and high-ranking officers in the armed forces; members of administrative, management, or supervisory bodies of state-owned enterprises; and directors, deputy directors, and members of the board or equivalent function of an international organisation. Family members of PEPs (spouse or partner, children, parents) and known close associates are treated as PEP-equivalent for EDD purposes."
+  },
+  {
+    "id": "amld4-art-13-cdd-measures",
+    "regulation": "Directive (EU) 2015/849 (AMLD4) as amended by AMLD5",
+    "article": "Article 13 — Customer due diligence measures",
+    "jurisdiction": "EU",
+    "topic": "CDD measures — identity verification and business relationship assessment",
+    "verbatim": false,
+    "source_note": "Faithful summary of AMLD4 Article 13",
+    "text": "Obliged entities must apply customer due diligence (CDD) measures comprising: (a) identifying the customer and verifying their identity using documents, data, or information obtained from reliable and independent sources; (b) identifying the beneficial owner and taking reasonable measures to verify their identity, so that the obliged entity is satisfied it knows who the beneficial owner is, including for legal persons and trusts; (c) assessing and obtaining information on the purpose and intended nature of the business relationship; and (d) conducting ongoing monitoring of the business relationship including scrutiny of transactions undertaken throughout the course of that relationship. For high-value tokenisation transactions, all four elements of CDD apply and must be documented."
+  },
+  {
+    "id": "amld4-art-14-timing-cdd",
+    "regulation": "Directive (EU) 2015/849 (AMLD4) as amended by AMLD5",
+    "article": "Article 14 — Timing of customer due diligence",
+    "jurisdiction": "EU",
+    "topic": "CDD timing — when verification must occur",
+    "verbatim": false,
+    "source_note": "Faithful summary of AMLD4 Article 14",
+    "text": "CDD must be applied: when establishing a business relationship; when carrying out an occasional transaction amounting to EUR 15,000 or more, whether in a single transaction or in several apparently linked transactions; when there is a suspicion of money laundering or terrorist financing, regardless of the amount; and when there are doubts about the veracity or adequacy of previously obtained customer identification data. For RWA tokenisation transactions which, by their nature, involve high-value assets, CDD requirements apply at the outset of the relationship and must be completed before the transaction is executed. Verification may be completed during establishment of a business relationship in limited low-risk circumstances but must be completed as soon as reasonably practicable."
+  },
+  {
+    "id": "amld4-art-18-edd-general",
+    "regulation": "Directive (EU) 2015/849 (AMLD4) as amended by AMLD5",
+    "article": "Article 18 — Enhanced due diligence — general provisions",
+    "jurisdiction": "EU",
+    "topic": "EDD general — higher-risk situations requiring enhanced measures",
+    "verbatim": false,
+    "source_note": "Faithful summary of AMLD4 Article 18",
+    "text": "Member States require obliged entities to apply enhanced due diligence (EDD) measures, over and above standard CDD, in all situations that by their nature present a higher risk of money laundering or terrorist financing. In any situation of higher risk, EDD shall include: (a) obtaining additional information on the customer beyond standard CDD requirements; (b) obtaining additional information on the intended nature and purpose of the business relationship; (c) obtaining information on the source of funds and source of wealth of the customer; (d) obtaining information on the reasons for intended or performed transactions. High-risk indicators for EDD in RWA tokenisation include: high-value transactions, complex ownership structures, offshore holding vehicles, customers from high-risk jurisdictions, and customers with PEP connections."
+  },
+  {
+    "id": "amld5-art-18a-high-risk-countries",
+    "regulation": "Directive (EU) 2018/843 (AMLD5)",
+    "article": "Article 18a — Enhanced due diligence for high-risk third countries",
+    "jurisdiction": "EU",
+    "topic": "EDD high-risk third countries — FATF blacklist and greylist measures",
+    "verbatim": false,
+    "source_note": "Faithful summary of AMLD5 Article 18a (new article inserted into AMLD4)",
+    "text": "In relation to business relationships or transactions involving persons established in or connected to high-risk third countries identified by the European Commission under Article 9 (based largely on FATF recommendations), obliged entities must apply specific enhanced CDD measures. These include: obtaining senior management approval before establishing or continuing a business relationship; taking adequate measures to establish the source of wealth and source of funds of the customer and beneficial owner; and conducting enhanced ongoing monitoring of the business relationship. For RWA tokenisation, where a beneficial owner or controlling person is connected to a high-risk country, these mandatory measures apply regardless of the asset type or the otherwise clean profile of the applicant."
+  },
+  {
+    "id": "amld4-art-20-pep-screening",
+    "regulation": "Directive (EU) 2015/849 (AMLD4) as amended by AMLD5",
+    "article": "Article 20 — Measures regarding politically exposed persons",
+    "jurisdiction": "EU",
+    "topic": "PEP screening obligation — risk-based procedures for PEP identification",
+    "verbatim": false,
+    "source_note": "Faithful summary of AMLD4 Article 20",
+    "text": "Member States require obliged entities to have in place risk-based procedures to determine whether a customer or the beneficial owner of a customer is a politically exposed person. Where a customer or beneficial owner is identified as a PEP, or where an existing customer becomes a PEP, the obliged entity must: (a) obtain approval from senior management for establishing or continuing the business relationship; (b) take adequate measures to establish the source of wealth and source of funds of the customer and beneficial owner who is a PEP; and (c) conduct enhanced ongoing monitoring of the business relationship. These measures must be maintained throughout the entire duration of the business relationship with a PEP and for a period of at least 18 months after the customer has ceased to be a PEP."
+  },
+  {
+    "id": "amld5-art-20a-foreign-pep",
+    "regulation": "Directive (EU) 2018/843 (AMLD5)",
+    "article": "Article 20a — Additional measures for PEPs from high-risk third countries",
+    "jurisdiction": "EU",
+    "topic": "Foreign PEP EDD — heightened measures for third-country PEPs",
+    "verbatim": false,
+    "source_note": "Faithful summary of AMLD5 Article 20a (new article inserted into AMLD4)",
+    "text": "For PEPs who are nationals of or resident in high-risk third countries, or who hold or have held prominent public functions in high-risk jurisdictions, Member States require obliged entities to apply all standard PEP measures plus additional enhanced measures proportionate to the increased risk. The European Banking Authority, ESMA, and EIOPA issue joint guidelines on risk factors that should trigger heightened scrutiny in this context. A combination of PEP status and connection to a high-risk jurisdiction represents the highest-risk category in EU AML supervision, and typically triggers mandatory referral to senior management and potentially to the national financial intelligence unit (FIU)."
+  },
+  {
+    "id": "amld4-art-22-senior-mgmt-approval",
+    "regulation": "Directive (EU) 2015/849 (AMLD4)",
+    "article": "Article 22 — Senior management approval for PEP relationships",
+    "jurisdiction": "EU",
+    "topic": "PEP — senior management approval requirement for onboarding",
+    "verbatim": false,
+    "source_note": "Faithful summary of AMLD4 Article 22 PEP measures",
+    "text": "The requirement for senior management approval when establishing or continuing a business relationship with a PEP means approval from a member of the management board or equivalent governing body, not merely a compliance officer or branch manager. The level of seniority required is commensurate with the risk: higher-risk PEP relationships (e.g., senior government ministers with connections to offshore structures) require approval from the most senior levels of the organisation. The approving senior manager must have been briefed on the specific risk profile and must have personally reviewed the EDD file. This approval must be documented and retained as part of the AML compliance record for the duration of the relationship and for five years after its termination."
+  },
+  {
+    "id": "amld4-art-23-pep-ongoing-monitoring",
+    "regulation": "Directive (EU) 2015/849 (AMLD4)",
+    "article": "Article 23 — Enhanced ongoing monitoring for PEPs",
+    "jurisdiction": "EU",
+    "topic": "PEP ongoing monitoring — enhanced transaction surveillance",
+    "verbatim": false,
+    "source_note": "Faithful summary of AMLD4 Article 23 PEP enhanced monitoring provisions",
+    "text": "Where a business relationship with a PEP exists, obliged entities must conduct enhanced ongoing monitoring of all transactions and activities conducted through or by the PEP. This means: reviewing the business relationship more frequently than standard, treating each transaction as potentially higher risk and scrutinising it accordingly, updating the source of wealth assessment when circumstances change, and filing suspicious transaction reports (STRs) to the national FIU where warranted. Monitoring obligations for PEP relationships continue for at least 18 months after the individual has ceased to hold the prominent public function that triggered PEP status. For RWA tokenisation, this means ongoing monitoring of any property or asset transactions involving the PEP's account."
+  },
+  {
+    "id": "amld4-art-18-source-of-funds",
+    "regulation": "Directive (EU) 2015/849 (AMLD4) as amended by AMLD5",
+    "article": "Articles 18 and 20 — Source of funds and source of wealth verification",
+    "jurisdiction": "EU",
+    "topic": "Source of funds verification — AML requirement for high-risk and PEP customers",
+    "verbatim": false,
+    "source_note": "Faithful synthesis of AMLD4 Articles 18 and 20 on source-of-funds obligations",
+    "text": "For customers in high-risk situations and for PEPs, obliged entities must verify both the source of funds (the origin of the money used in the specific transaction) and the source of wealth (the origin of the customer's total assets). Verification requires documentary evidence, not merely customer assertions: acceptable evidence includes tax returns, salary statements, property sale contracts, inheritance documentation with probate records, or audited business financial statements. Offshore structures described as 'unverifiable' cannot constitute an acceptable source of funds under EU AML requirements; the obliged entity must either obtain documentation establishing the legitimate origin of the funds or decline the transaction. Failure to verify source of funds in a high-risk or PEP context constitutes a breach of AMLD obligations."
+  },
+  {
+    "id": "amld4-art-30-beneficial-ownership",
+    "regulation": "Directive (EU) 2015/849 (AMLD4) as amended by AMLD5",
+    "article": "Article 30 — Registers of beneficial ownership — companies",
+    "jurisdiction": "EU",
+    "topic": "Beneficial ownership — corporate transparency and register requirements",
+    "verbatim": false,
+    "source_note": "Faithful summary of AMLD4 Article 30 as amended by AMLD5",
+    "text": "All corporate entities and other legal entities incorporated within EU Member States must obtain and hold adequate, accurate, and current information on their beneficial ownership, including details of the beneficial interest held. This information must be filed in a central register in each Member State and must be available to competent authorities and, following the AMLD5 amendment, to any member of the public in relation to a minimum set of information. For RWA tokenisation, obliged entities must identify the beneficial owner of any corporate vehicle (SPV, holding company, fund) submitting a tokenisation request, and must independently verify this against the central register. Discrepancies between stated and registered beneficial ownership trigger mandatory reporting."
+  },
+  {
+    "id": "amld4-art-40-record-keeping",
+    "regulation": "Directive (EU) 2015/849 (AMLD4)",
+    "article": "Article 40 — Record keeping obligations",
+    "jurisdiction": "EU",
+    "topic": "AML record keeping — document retention requirements",
+    "verbatim": false,
+    "source_note": "Faithful summary of AMLD4 Article 40",
+    "text": "Obliged entities must retain copies of all documents obtained in the context of CDD and EDD obligations for a period of five years after the end of the business relationship with the customer or after the date of the occasional transaction. Transaction records, including information obtained on the purpose and nature of transactions, must be retained for five years after the transaction date. Records must be maintained in a form that allows reconstruction of individual transactions to enable identification of persons involved and provide evidence in criminal proceedings. For RWA tokenisation, this means retaining all KYC documentation, source-of-funds evidence, beneficial ownership verification, and transaction records for the full retention period."
+  },
+  {
+    "id": "amld4-art-24-ongoing-monitoring-general",
+    "regulation": "Directive (EU) 2015/849 (AMLD4)",
+    "article": "Article 24 — Ongoing monitoring of business relationships",
+    "jurisdiction": "EU",
+    "topic": "Ongoing CDD — transaction scrutiny and document refresh obligations",
+    "verbatim": false,
+    "source_note": "Faithful summary of AMLD4 Article 24",
+    "text": "Obliged entities must conduct ongoing monitoring of business relationships, including scrutiny of transactions undertaken during the relationship to ensure they are consistent with the entity's knowledge of the customer, their business, risk profile, and where necessary the source of funds. Documents, data, and information held on customers must be kept up to date. Enhanced scrutiny applies to complex, unusually large transactions or unusual patterns of transactions with no apparent economic or lawful purpose. For high-value RWA tokenisation transactions exceeding EUR 1 million, periodic review of source-of-funds documentation is standard practice, and any significant change in the customer's asset profile requires re-assessment of the AML risk rating."
+  },
+  {
+    "id": "amld-unverifiable-offshore-red-flag",
+    "regulation": "Directive (EU) 2015/849 (AMLD4) as amended; FATF Recommendation 10",
+    "article": "Articles 13, 18, 20 (AMLD4) — Offshore structures as AML red flags",
+    "jurisdiction": "EU",
+    "topic": "Offshore and unverifiable source of funds — AML red flag pattern",
+    "verbatim": false,
+    "source_note": "Synthesis of AMLD obligations and FATF guidance on offshore red flags",
+    "text": "Unverifiable offshore structures are among the most significant red flags in EU AML supervision. FATF Recommendation 10 and EU AMLD guidelines identify the following combination as indicative of potential money laundering: (a) a customer connected to a PEP or sanctioned network; (b) source of funds described as offshore structures without documented provenance; and (c) high-value assets (above EUR 1 million) being purchased or tokenised. Where these three indicators co-exist, the obliged entity must not proceed with the transaction unless it can establish, through documented evidence, the legitimate origin of the funds. Filing a Suspicious Transaction Report (STR) with the national FIU is required where the risk cannot be mitigated. A business relationship cannot be established or continued if the source of funds cannot be verified."
+  }
+]

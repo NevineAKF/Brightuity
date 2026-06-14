@@ -1,0 +1,222 @@
+[
+  {
+    "id": "mica-art-2-scope-mifid-exclusion",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 2(3) — Scope: exclusion of MiFID II financial instruments",
+    "jurisdiction": "EU",
+    "topic": "RWA classification — MiCA vs MiFID II boundary",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 2(3) and associated recitals",
+    "text": "MiCA does not apply to crypto-assets that qualify as financial instruments within the meaning of MiFID II (Directive 2014/65/EU). A digital token that confers on its holder rights economically equivalent to transferable securities — such as equity participation, voting rights, profit entitlement, or liquidation preference in a property-holding special-purpose vehicle — falls under MiFID II, not MiCA. Determining which regime applies is therefore the first and most fundamental step in structuring any real-world asset tokenisation. Hybrid instruments sharing characteristics of both regimes must be assessed on a case-by-case basis; the substance of the rights conferred, not the technical label, determines classification."
+  },
+  {
+    "id": "mica-art-3-definition-crypto-asset",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 3(1)(5) — Definition: crypto-asset",
+    "jurisdiction": "EU",
+    "topic": "Definition of crypto-asset under MiCA",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 3(1)(5)",
+    "text": "Under MiCA, a 'crypto-asset' means a digital representation of a value or of a right that is able to be transferred and stored electronically, using distributed ledger technology or similar technology. This definition encompasses tokens representing claims on real-world assets provided those tokens are not already categorised as financial instruments under MiFID II. The definition is intentionally broad to capture novel instrument types arising from blockchain technology, including asset-referenced tokens and e-money tokens."
+  },
+  {
+    "id": "mica-art-3-definition-art",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 3(1)(6) — Definition: asset-referenced token (ART)",
+    "jurisdiction": "EU",
+    "topic": "Definition of asset-referenced token — RWA tokenisation primary vehicle",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 3(1)(6)",
+    "text": "An 'asset-referenced token' (ART) is a type of crypto-asset that is not an electronic money token and that purports to maintain a stable value by referencing another value or right, or a combination thereof, including one or more official currencies. ARTs are the primary MiCA instrument for tokenising real-world assets such as real property, commodities, and diversified asset baskets, provided the token does not constitute a financial instrument under MiFID II. The ART framework under Title II of MiCA governs issuance, authorisation, reserve management, and redemption obligations."
+  },
+  {
+    "id": "mica-art-3-definition-emt",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 3(1)(7) — Definition: e-money token (EMT)",
+    "jurisdiction": "EU",
+    "topic": "Definition of e-money token — single-currency stablecoin",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 3(1)(7)",
+    "text": "An 'e-money token' (EMT) is a type of crypto-asset that purports to maintain a stable value by referencing the value of one official currency. Where a real-world asset token is structured to track solely the euro value of an asset (as opposed to the asset itself), it may be classified as an EMT falling under Title III of MiCA rather than the ART framework of Title II. This classification has significant implications for authorisation requirements, as EMT issuers must be authorised credit institutions or electronic money institutions under Directive 2009/110/EC."
+  },
+  {
+    "id": "mica-art-3-definition-casp",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 3(1)(15) — Definition: crypto-asset service provider (CASP)",
+    "jurisdiction": "EU",
+    "topic": "Definition of CASP — authorised entity for crypto-asset services",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 3(1)(15) and Title IV",
+    "text": "A 'crypto-asset service provider' (CASP) is a legal person or other undertaking whose occupation or business it is to provide one or more crypto-asset services to third parties on a professional basis. Crypto-asset services include: custody and administration, operation of a trading platform, exchange for funds or other crypto-assets, execution of orders, placing, reception and transmission of orders, providing advice, and portfolio management. Banks and digital asset divisions facilitating RWA tokenisation on behalf of clients may themselves qualify as CASPs requiring separate authorisation under Title IV."
+  },
+  {
+    "id": "mica-art-6-whitepaper-general",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 6 — Obligation to publish a crypto-asset white paper",
+    "jurisdiction": "EU",
+    "topic": "White paper obligation for crypto-asset issuers",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 6",
+    "text": "Any person intending to make an offer to the public in the European Union of a crypto-asset other than an asset-referenced token or e-money token must draw up a crypto-asset white paper and notify the competent authority of their home Member State before publication. The white paper does not require prior approval by the competent authority but must comply with the content and form requirements of Article 7. A liability framework attaches to the white paper: persons responsible for it are liable for misleading, inaccurate, or incomplete information. Exemptions exist for offers below EUR 1 million over 12 months and offers to fewer than 150 persons per Member State."
+  },
+  {
+    "id": "mica-art-7-whitepaper-content",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 7 — Content and form of the crypto-asset white paper",
+    "jurisdiction": "EU",
+    "topic": "White paper content requirements — disclosure obligations",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 7",
+    "text": "The crypto-asset white paper must include: information on the offeror or issuer and any project promoters; a description of the crypto-asset project and the public offer; information on the underlying technology and standards; key features, functions, and rights attached to the crypto-asset; information on risks; details of the offer (quantity, price, use of proceeds); and information on the offeror's financial condition. The white paper must be drawn up in an official language of the home Member State or a language customary in international finance, be written in a clear and comprehensible manner, be accurate and not misleading, and must not contain material omissions. A summary must also be included."
+  },
+  {
+    "id": "mica-art-76-whitepaper-art",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 76 — White paper for asset-referenced tokens",
+    "jurisdiction": "EU",
+    "topic": "ART-specific white paper — enhanced disclosure for RWA tokens",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 76",
+    "text": "Asset-referenced tokens require a more detailed white paper than general crypto-assets. The ART white paper must additionally include: a detailed description of the reserve of assets including its composition, management, and custody arrangements; a description of the mechanism for maintaining the stable value and the asset stabilisation mechanism; information on redemption rights including procedures, timelines, and any fees; governance arrangements for the reserve; risk factors specific to the reserve assets; and audit arrangements for the reserve. The ART white paper must be approved by the competent authority before publication, unlike general crypto-asset white papers."
+  },
+  {
+    "id": "mica-art-16-art-authorisation",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 16 — Authorisation to offer asset-referenced tokens to the public",
+    "jurisdiction": "EU",
+    "topic": "ART authorisation requirement — regulatory permission to issue",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 16",
+    "text": "Issuance of asset-referenced tokens to the public in the EU, or seeking admission to trading of ARTs, requires prior authorisation from the competent authority of the issuer's home Member State. Only legal persons established in the EU may apply for ART authorisation; branches of third-country undertakings cannot be authorised as ART issuers. Authorisation is not required where the total consideration for the offer does not exceed EUR 5 million over a 12-month period, or where the offer is exclusively addressed to qualified investors. Authorised credit institutions may issue ARTs following a simpler notification procedure rather than full authorisation."
+  },
+  {
+    "id": "mica-art-17-art-application",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 17 — Application for authorisation to issue ARTs",
+    "jurisdiction": "EU",
+    "topic": "ART authorisation application — required documentation",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 17",
+    "text": "An application for ART authorisation must include: details of the issuer including registered address and legal form; a draft white paper meeting Article 76 requirements; a programme of operations including the business model; evidence of adequate own funds pursuant to Article 22; governance arrangements including policies and procedures; a recovery plan for managing stress situations; internal controls for AML/CFT; identity of shareholders holding qualifying holdings (5% or more); and descriptions of the technical systems and security measures. The competent authority may refuse authorisation where the documents are incomplete, the reserve management is inadequate, or governance does not meet standards."
+  },
+  {
+    "id": "mica-art-18-art-assessment",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 18 — Assessment of the application for authorisation",
+    "jurisdiction": "EU",
+    "topic": "ART authorisation timeline and assessment process",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 18",
+    "text": "Upon receipt of an application for ART authorisation, the competent authority must assess its completeness within 25 working days and notify the applicant of any missing information. Once the application is deemed complete, the competent authority has 60 working days to assess it and grant or refuse authorisation. The competent authority must consult the European Banking Authority (EBA) before granting authorisation. EBA has 20 working days to issue a non-binding opinion. Where EBA's opinion diverges from the competent authority's intended decision, the competent authority must provide a written explanation of its reasons for deviation."
+  },
+  {
+    "id": "mica-art-21-ongoing-obligations",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 21 — Ongoing obligations of issuers of ARTs",
+    "jurisdiction": "EU",
+    "topic": "ART issuer ongoing conduct obligations",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 21",
+    "text": "Issuers of ARTs must at all times: act honestly, fairly, and professionally in accordance with the best interests of ART holders; communicate information that is accurate, fair, clear, and not misleading; prevent, identify, manage, and disclose conflicts of interest; maintain adequate and proportionate systems, resources, and procedures; have robust governance arrangements including sound administrative and accounting procedures; and maintain a functioning and appropriate recovery plan. Issuers must notify the competent authority of any material changes to the information provided at authorisation stage. They must have effective complaint handling procedures for ART holders."
+  },
+  {
+    "id": "mica-art-22-own-funds",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 22 — Own funds requirements for ART issuers",
+    "jurisdiction": "EU",
+    "topic": "ART issuer minimum capital — own funds floor",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 22",
+    "text": "Issuers of asset-referenced tokens must hold own funds at all times at least equal to the highest of the following three amounts: (a) EUR 350,000; (b) 2% of the average amount of the reserve of assets calculated over the preceding six calendar months; or (c) a quarter of the fixed overheads of the preceding year. Own funds must consist of Common Equity Tier 1 (CET1) items as defined under the Capital Requirements Regulation (CRR). This minimum capital requirement is a continuous obligation — a breach triggers immediate notification to the competent authority and a remediation plan."
+  },
+  {
+    "id": "mica-art-23-reserve-assets",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 23 — Reserve of assets for ARTs",
+    "jurisdiction": "EU",
+    "topic": "ART reserve of assets — composition, management, and segregation",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 23",
+    "text": "Issuers of ARTs must constitute and at all times maintain a reserve of assets at least equal in value and composition to the tokens in circulation. The reserve must be composed of assets that are sufficiently low-risk and liquid to enable redemption on demand. The reserve assets must be legally segregated from the issuer's own assets and from the reserves of any other ART the issuer maintains; they must be protected from claims of the issuer's creditors in insolvency. Policies and procedures for managing the reserve, including rebalancing, must be approved by the competent authority. For RWA tokens referencing real property, the reserve typically consists of the property rights, valuations, and any associated financial instruments."
+  },
+  {
+    "id": "mica-art-25-custody-reserve",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 25 — Custody of reserve assets for ARTs",
+    "jurisdiction": "EU",
+    "topic": "ART reserve custody — authorised custodians only",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 25",
+    "text": "At least 30% of the reserve assets of an ART must be held by at least two authorised credit institutions as custodians. Crypto-assets forming part of the reserve must be held in custody by CASPs authorised for custody services or by authorised credit institutions. Custodians must be independent from the ART issuer and must hold the reserve assets separately from their own assets. The custody arrangement must ensure that reserve assets can be identified and returned to the token holders in the event of the issuer's insolvency. Custodians owe contractual and legal duties to ART holders, not merely to the issuer."
+  },
+  {
+    "id": "mica-art-35-redemption-rights",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 35 — Right of redemption for holders of ARTs",
+    "jurisdiction": "EU",
+    "topic": "ART holder redemption rights — liquidity guarantee",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 35",
+    "text": "Holders of asset-referenced tokens have the right to redeem their tokens at any time at the market value of the referenced assets through the ART issuer. The issuer may not impose conditions that effectively restrict or prevent timely redemption. Fees may be charged for redemption only on a cost-recovery basis and must be disclosed in the white paper. The issuer must have a permanent redemption facility with adequate liquidity to meet expected redemption demands under normal and stressed conditions. For ARTs referencing illiquid real-world assets such as property, specific liquidity management mechanisms including redemption-in-kind provisions must be documented and approved."
+  },
+  {
+    "id": "mica-art-45-significant-art",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 45 — Classification of ARTs as significant",
+    "jurisdiction": "EU",
+    "topic": "Significant ART designation — enhanced prudential regime",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 45",
+    "text": "The European Banking Authority (EBA) shall classify an ART as significant where at least three of the following criteria are met: (a) the customer base of the ART exceeds 10 million holders or customers; (b) the value of outstanding ARTs or market capitalisation exceeds EUR 5 billion; (c) the number of daily transactions or total daily value exceeds EBA-specified thresholds; (d) the size of the reserve of assets exceeds EUR 2.5 billion; (e) the ART has significant cross-border reach; (f) the ART has significant interconnectedness with the financial system; or (g) the ART is of systemic importance for underlying asset markets. Significant ARTs are subject to direct EBA supervision and enhanced requirements under Article 46."
+  },
+  {
+    "id": "mica-art-46-significant-art-obligations",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 46 — Obligations applicable to significant ART issuers",
+    "jurisdiction": "EU",
+    "topic": "Significant ART enhanced requirements — systemic risk management",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 46",
+    "text": "Issuers of significant ARTs face additional obligations beyond standard ART requirements: higher own funds (3% of average reserve rather than 2%); mandatory interoperability requirements; detailed liquidity stress-testing at least annually; a recovery and orderly wind-down plan; stricter governance requirements including an independent risk committee; enhanced reporting to EBA; and a requirement to hold a specified portion of the reserve in deposits at authorised credit institutions. Significant ART issuers may not pursue activities beyond ART issuance and related services without regulatory approval. These provisions reflect the systemic risk implications of large-scale tokenisation programmes."
+  },
+  {
+    "id": "mica-art-59-casp-authorisation",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 59 — Authorisation as a crypto-asset service provider",
+    "jurisdiction": "EU",
+    "topic": "CASP authorisation — single licence, EU passport",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 59 and Title IV",
+    "text": "Any legal person or other undertaking wishing to provide one or more crypto-asset services in the EU on a professional basis must apply for authorisation from the competent authority of their home Member State. An authorised CASP receives a single licence valid throughout the EU via a passporting mechanism: once authorised in one Member State, the CASP may provide services in all other Member States following a simple notification procedure. Authorisation requires demonstrating: adequate own funds, fit-and-proper management, sound governance, AML/CFT compliance systems, client asset protection arrangements, and technology security measures. Authorisation can be revoked for material breaches, including AML/CFT failures."
+  },
+  {
+    "id": "mica-art-63-custody-casp",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 63 — Requirements for the provision of custody and administration of crypto-assets",
+    "jurisdiction": "EU",
+    "topic": "CASP custody obligations — client asset protection",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Article 63",
+    "text": "CASPs providing custody and administration of crypto-assets must: keep the crypto-assets and access means to those assets separate from their own assets; maintain accurate records of all client positions; not use clients' crypto-assets on their own account without express written consent; arrange adequate safeguards against operational and technological risks including hacking; and, in the event of insolvency, ensure client crypto-assets remain outside the CASP estate and can be returned to clients. Clients must be given a custody account statement and must be promptly compensated for any loss of crypto-assets attributable to the CASP's failure or error."
+  },
+  {
+    "id": "mica-art-89-market-manipulation",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Article 89 — Prohibition on market manipulation",
+    "jurisdiction": "EU",
+    "topic": "Market abuse — manipulation prohibition for ARTs on trading venues",
+    "verbatim": false,
+    "source_note": "Faithful summary of MiCA Articles 86-92 (market abuse provisions)",
+    "text": "MiCA prohibits insider dealing, unlawful disclosure of inside information, and market manipulation in relation to crypto-assets admitted to trading on a trading platform. Market manipulation includes: transactions or orders that give false or misleading signals as to the supply, demand, or price of a crypto-asset; securing the price of a crypto-asset at an artificial level; disseminating information that gives false or misleading signals; and wash trading arrangements. For ARTs admitted to trading, the issuer and any affiliated persons are subject to these prohibitions and must have market surveillance policies. Competent authorities have investigation and sanction powers including administrative fines up to EUR 15 million or 15% of annual turnover."
+  },
+  {
+    "id": "mica-recital-rwa-property-classification",
+    "regulation": "Regulation (EU) 2023/1114 (MiCA)",
+    "article": "Recitals 9–11 and Article 2 — RWA property token classification",
+    "jurisdiction": "EU",
+    "topic": "Real property tokenisation — classification analysis and regulatory pathway",
+    "verbatim": false,
+    "source_note": "Faithful synthesis of MiCA recitals and Article 2 regarding RWA tokenisation",
+    "text": "The classification of a real property token depends on the rights it confers. A token representing a direct fractional ownership interest in a property (with associated rights to rental income, sale proceeds, and governance) is likely a transferable security under MiFID II and falls outside MiCA. A token that merely tracks the market value of a property without conferring ownership rights — functioning like a synthetic ART referencing property prices — may fall within MiCA's ART framework. For commercial real estate tokenisation programmes, a legal opinion on classification is essential before applying for MiCA ART authorisation. Misclassification exposes the issuer to enforcement risk under both MiCA and MiFID II."
+  }
+]
