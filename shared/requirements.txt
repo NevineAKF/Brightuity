@@ -1,0 +1,11 @@
+# Shared model-access layer dependencies.
+# Install alongside backend/requirements.txt:
+#   pip install -r shared/requirements.txt -r backend/requirements.txt
+
+# OpenAI-compatible SDK — works with AI/ML API, Featherless, and any
+# OpenAI-compatible endpoint via the base_url parameter.
+openai>=1.30.0
+
+# Loads .env into os.environ at startup. No-op when vars are already set
+# (i.e. in Docker/production where vars are injected directly).
+python-dotenv>=1.0.0

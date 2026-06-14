@@ -1,0 +1,11 @@
+# Consensus Signer dependencies — pure Python + cryptography library only.
+# No LLM SDK, no HTTP client, no framework dependency.
+#
+# The cryptography library is maintained by the Python Cryptographic Authority (PyCA),
+# is the de facto standard for production cryptographic primitives in Python,
+# and wraps OpenSSL — the same engine used in banking TLS infrastructure.
+#
+# It provides: ECDSA, AES-GCM, RSA, X.509, HKDF, constant-time comparisons.
+# It does NOT provide: randomness (uses os.urandom via OpenSSL), key storage (use HSM).
+
+cryptography>=42.0.0
