@@ -50,3 +50,14 @@ class DynamicComplianceVerdict(BaseModel):
     jurisdiction: str
     citations:    list[str]
     concerns:     list[str]
+
+
+class StressTestVerdict(BaseModel):
+    """
+    Output contract for the Stress-Test Simulator agent.
+    Quantitative market and liquidity risk assessment for RWA tokenisation.
+    """
+    verdict:      Literal["pass", "fail"]
+    summary:      str
+    risk_level:   Literal["low", "medium", "high", "critical"]
+    risk_factors: list[str]
