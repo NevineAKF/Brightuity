@@ -61,3 +61,17 @@ class StressTestVerdict(BaseModel):
     summary:      str
     risk_level:   Literal["low", "medium", "high", "critical"]
     risk_factors: list[str]
+
+
+class AssetTokenizerVerdict(BaseModel):
+    """
+    Output contract for the Asset Tokenizer agent.
+    Proposes the on-chain tokenisation structure for a real-world asset.
+    Does not mint or issue — it produces a structure recommendation for human approval.
+    """
+    verdict:             Literal["pass", "fail"]
+    summary:             str
+    token_standard:      str     # proposed standard / class label (e.g. ERC-3643 T-REX)
+    total_tokens:        int     # proposed total supply
+    value_per_token_eur: float   # nominal EUR value per token
+    structure_notes:     list[str]  # key parameters, assumptions, caveats

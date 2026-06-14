@@ -187,11 +187,13 @@ AGENT_MODEL_CHAINS: dict[str, ModelChain] = {
 
     # ── Asset Tokenizer (Featherless) ───────────────────────────────────────
     # Designs ERC-3643 token structure.
-    # Kimi-K2.6: json_object → EMPTY; plain → clean JSON ✓
-    # GLM-4.6: not probed; treat as plain (same platform behaviour).
+    # GLM-4.6 promoted to primary after probe (2026-06-14): correct structures,
+    # math ±0.0%, 1.5–3.3× faster than Kimi-K2.6 (37–148 s vs 121–238 s).
+    # Kimi-K2.6 demoted — valid output but unacceptably slow for live pipeline.
+    # Qwen3.6-27B fallback: plain mode confirmed ✓ from structured-output probe.
     "asset_tokenizer": ModelChain(
-        primary="moonshotai/Kimi-K2.6",
-        fallback="zai-org/GLM-4.6",
+        primary="zai-org/GLM-4.6",
+        fallback="Qwen/Qwen3.6-27B",
         platform=Platform.FEATHERLESS,
         primary_json_mode="plain",
         fallback_json_mode="plain",
