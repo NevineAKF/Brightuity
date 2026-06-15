@@ -22,6 +22,7 @@ Engine is read-only: this file NEVER modifies agents/ or shared/.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -104,6 +105,10 @@ class ComplianceAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
     and ignored. The adapter is intentionally stateless: each message is self-contained.
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._in_flight: set[tuple[str, str]] = set()
+
     async def on_message(
         self,
         msg: PlatformMessage,
@@ -142,45 +147,53 @@ class ComplianceAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             )
             return
 
-        await tools.send_message(
-            f"Running compliance assessment for `{request_id}`… "
-            "(RAG retrieval + Gemini 2.5 Pro — may take a few seconds)",
-            mentions=[sender],
-        )
-
+        key = (room_id, request_id)
+        if key in self._in_flight:
+            logger.debug("Compliance: duplicate @mention for %s in room %s — ignoring", request_id, room_id)
+            return
+        self._in_flight.add(key)
         try:
-            result = assess_compliance(client)
-        except Exception as exc:
-            logger.exception("assess_compliance failed for %s", request_id)
             await tools.send_message(
-                f"Compliance assessment failed for `{request_id}`: {exc}",
+                f"Running compliance assessment for `{request_id}`… "
+                "(RAG retrieval + Gemini 2.5 Pro — may take a few seconds)",
                 mentions=[sender],
             )
-            return
 
-        # Human-readable verdict.
-        reply = _format_reply(request_id, result)
-        await tools.send_message(reply, mentions=[sender])
+            try:
+                result = await asyncio.to_thread(assess_compliance, client)
+            except Exception as exc:
+                logger.exception("assess_compliance failed for %s", request_id)
+                await tools.send_message(
+                    f"Compliance assessment failed for `{request_id}`: {exc}",
+                    mentions=[sender],
+                )
+                return
 
-        # Structured metadata for downstream tooling (no PII).
-        metadata: dict[str, Any] = {
-            "agent":        "dynamic_compliance",
-            "request_id":   request_id,
-            "verdict":      result.get("verdict"),
-            "jurisdiction": result.get("jurisdiction"),
-            "citations":    result.get("citations"),
-            "concerns":     result.get("concerns"),
-            "retrieved_k":  result.get("retrieved_k"),
-            "model_used":   result.get("model_used"),
-            "was_fallback": result.get("was_fallback"),
-            "latency_ms":   result.get("latency_ms"),
-        }
-        await tools.send_event(
-            content=f"compliance_assessment_result:{request_id}",
-            message_type="tool_result",
-            metadata=metadata,
-        )
-        logger.info(
-            "Compliance assessment posted to Band room %s — %s → %s",
-            room_id, request_id, result.get("verdict"),
-        )
+            # Human-readable verdict.
+            reply = _format_reply(request_id, result)
+            await tools.send_message(reply, mentions=[sender])
+
+            # Structured metadata for downstream tooling (no PII).
+            metadata: dict[str, Any] = {
+                "agent":        "dynamic_compliance",
+                "request_id":   request_id,
+                "verdict":      result.get("verdict"),
+                "jurisdiction": result.get("jurisdiction"),
+                "citations":    result.get("citations"),
+                "concerns":     result.get("concerns"),
+                "retrieved_k":  result.get("retrieved_k"),
+                "model_used":   result.get("model_used"),
+                "was_fallback": result.get("was_fallback"),
+                "latency_ms":   result.get("latency_ms"),
+            }
+            await tools.send_event(
+                content=f"compliance_assessment_result:{request_id}",
+                message_type="tool_result",
+                metadata=metadata,
+            )
+            logger.info(
+                "Compliance assessment posted to Band room %s — %s → %s",
+                room_id, request_id, result.get("verdict"),
+            )
+        finally:
+            self._in_flight.discard(key)

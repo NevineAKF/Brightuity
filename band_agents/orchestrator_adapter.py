@@ -1,5 +1,5 @@
 """
-band_agents/orchestrator_adapter.py  (Phase 2g — Band coordination)
+band_agents/orchestrator_adapter.py  (Phase 2h — Band coordination + ECDSA seal)
 Brightuity — Orchestrator Band adapter.
 
 COORDINATION PATTERN (real Band, no in-process calls):
@@ -13,7 +13,9 @@ COORDINATION PATTERN (real Band, no in-process calls):
   3. When all 4 stage-1 verdicts are collected → _evaluate_governance_gate:
      - halt/blocked → post stop message + send_event, case complete.
      - pass → @mention Asset Tokenizer with the same REQ-id.
-  4. Tokenizer reply arrives → post "@Consensus Signer — seal REQ-xxxx." handoff.
+  4. Tokenizer reply arrives → Orchestrator runs ConsensusSigner.seal() in-process
+     on the structured verdicts already held in case state (no chat-text re-parsing),
+     then posts the ECDSA seal result labeled as the Consensus Signer step.
 
 STATE: self._cases[(room_id, request_id)] — persists across on_message() calls.
        asyncio is single-threaded; no locks needed for in-memory dict ops.
@@ -44,16 +46,32 @@ Engine is read-only: NEVER modifies agents/ or shared/.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 from band.core.simple_adapter import SimpleAdapter
 from band.core.protocols import AgentToolsProtocol
 from band.core.types import PlatformMessage
 
+from agents.consensus_signer.logic import ConsensusSigner
+
 logger = logging.getLogger(__name__)
+
+_CLIENTS_JSON = Path(__file__).parent.parent / "database" / "brightuity_clients.json"
+
+
+def _load_client_index() -> dict[str, dict[str, Any]]:
+    with open(_CLIENTS_JSON, encoding="utf-8") as fh:
+        data = json.load(fh)
+    return {c["request_id"]: c for c in data["clients"]}
+
+
+_CLIENT_INDEX: dict[str, dict[str, Any]] = _load_client_index()
 
 _REQ_ID_RE = re.compile(r"\b(REQ-\d+)\b", re.IGNORECASE)
 
@@ -164,11 +182,15 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
         self._token_id     = os.environ.get("BAND_TOKENIZER_AGENT_ID", "")
         self._consensus_id = os.environ.get("BAND_CONSENSUS_AGENT_ID", "")
 
+        # One ConsensusSigner per process — stable ephemeral keypair for the session.
+        self._signer = ConsensusSigner()
+
         # Per-(room_id, request_id) pipeline state.
         # {
         #   "initiator": str,   # human sender_id — used for all reply mentions
         #   "state": "awaiting_stage1" | "awaiting_tokenizer" | "complete",
-        #   "verdicts": {gate_key: "pass"|"fail"|"halt"|None, ...},
+        #   "verdicts":  {gate_key: "pass"|"fail"|"halt"|None, ...},
+        #   "summaries": {gate_key: str},  # first ~300 chars of agent's reply (for seal)
         # }
         self._cases: dict[tuple[str, str], dict[str, Any]] = {}
 
@@ -223,6 +245,7 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             "initiator": sender,
             "state":     "awaiting_stage1",
             "verdicts":  {k: None for k in _STAGE1_GATES},
+            "summaries": {},
         }
         logger.info("orchestrator: NEW CASE %s room=%s", request_id, room_id)
 
@@ -292,7 +315,8 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 )
                 return
 
-            case["verdicts"][agent_name] = verdict
+            case["verdicts"][agent_name]  = verdict
+            case["summaries"][agent_name] = content[:300]
             collected = sum(1 for v in case["verdicts"].values() if v is not None)
             logger.info(
                 "orchestrator: %s → %s=%s (%d/%d collected)",
@@ -304,35 +328,95 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
 
             await self._apply_gate(tools, case_key, case, request_id, initiator)
 
-        # ── Tokenizer verdict → Consensus Signer handoff ───────────────────────
+        # ── Tokenizer verdict → ECDSA seal (Consensus Signer step) ───────────────
         elif state == "awaiting_tokenizer" and agent_name == "asset_tokenizer":
-            verdict = _parse_verdict(content)
-            case["verdicts"]["asset_tokenizer"] = verdict
+            token_verdict = _parse_verdict(content)
+            case["verdicts"]["asset_tokenizer"]  = token_verdict
+            case["summaries"]["asset_tokenizer"] = content[:300]
             case["state"] = "complete"
             logger.info(
-                "orchestrator: %s tokenizer=%s → handing off to Consensus Signer",
-                request_id, verdict,
+                "orchestrator: %s tokenizer=%s → running ConsensusSigner.seal()",
+                request_id, token_verdict,
             )
 
-            cs_mentions = [m for m in [initiator, self._consensus_id] if m]
-            await tools.send_message(
-                f"Asset Tokenizer: **{(verdict or '?').upper()}** for `{request_id}`.\n\n"
-                "@Consensus Signer — please seal `{request_id}`.".replace(
-                    "{request_id}", request_id
-                ),
-                mentions=cs_mentions or [initiator],
-            )
-            await tools.send_event(
-                content=f"orchestrator_handoff:{request_id}",
-                message_type="tool_result",
-                metadata={
-                    "agent":             "orchestrator",
-                    "request_id":        request_id,
-                    "state":             "awaiting_consensus",
-                    "stage1_verdicts":   {k: case["verdicts"].get(k) for k in _STAGE1_GATES},
-                    "tokenizer_verdict": verdict,
-                },
-            )
+            # Build case_record from non-PII client metadata.
+            client = _CLIENT_INDEX.get(request_id, {})
+            case_record: dict[str, Any] = {
+                "request_id":      request_id,
+                "client_id":       client.get("client_id"),
+                "asset_type":      client.get("asset_type"),
+                "asset_value_eur": client.get("asset_value_eur"),
+                "submitted_at":    client.get("submitted_at"),
+            }
+
+            # Build agent_verdicts from structured state — no chat-text re-parsing.
+            v        = case["verdicts"]
+            summs    = case["summaries"]
+            agent_verdicts: dict[str, dict] = {
+                "doc_auditor":        {"verdict": v["doc_auditor"],        "summary": summs.get("doc_auditor", "")},
+                "kyc_guardian":       {"verdict": v["kyc_guardian"],       "summary": summs.get("kyc_guardian", "")},
+                "dynamic_compliance": {"verdict": v["dynamic_compliance"], "summary": summs.get("dynamic_compliance", "")},
+                "stress_test":        {"verdict": v["stress_test"],        "summary": summs.get("stress_test", "")},
+                "asset_tokenizer":    {"verdict": token_verdict,           "summary": summs.get("asset_tokenizer", "")},
+            }
+
+            seal = await asyncio.to_thread(self._signer.seal, case_record, agent_verdicts)
+
+            if seal["status"] == "sealed":
+                sig_preview = seal["signature"][:16] + "…"
+                await tools.send_message(
+                    f"**Consensus Signer** — SEALED `{request_id}`\n"
+                    f"Hash: `{seal['canonical_hash'][:20]}…`\n"
+                    f"Signature: `{sig_preview}` · Curve: {seal['curve']}\n"
+                    f"Gates cleared: {', '.join(seal['gates_cleared'])}\n"
+                    f"Sealed at: {seal['sealed_at']}\n\n"
+                    "Status: **approved_pending_human** — ready for the Head of "
+                    "Digital Assets to review and sign.",
+                    mentions=[initiator],
+                )
+                await tools.send_event(
+                    content=f"consensus_seal:{request_id}",
+                    message_type="tool_result",
+                    metadata={
+                        "agent":         "consensus_signer",
+                        "request_id":    request_id,
+                        "status":        "approved_pending_human",
+                        "seal_hash":     seal["canonical_hash"],
+                        "signature":     seal["signature"],
+                        "public_key":    seal["public_key"],
+                        "curve":         seal["curve"],
+                        "gates_cleared": seal["gates_cleared"],
+                        "sealed_at":     seal["sealed_at"],
+                    },
+                )
+                logger.info(
+                    "orchestrator: %s → SEALED (approved_pending_human) hash=%s…",
+                    request_id, seal["canonical_hash"][:16],
+                )
+            else:
+                await tools.send_message(
+                    f"**Consensus Signer** — SEAL BLOCKED `{request_id}`\n"
+                    f"Failed gate: **{seal['failed_gate']}**\n"
+                    f"{seal['reason']}\n\n"
+                    "Status: **blocked_gate** — token structure is visible above; "
+                    "no cryptographic seal was produced.",
+                    mentions=[initiator],
+                )
+                await tools.send_event(
+                    content=f"consensus_seal:{request_id}",
+                    message_type="tool_result",
+                    metadata={
+                        "agent":       "consensus_signer",
+                        "request_id":  request_id,
+                        "status":      "blocked_gate",
+                        "failed_gate": seal["failed_gate"],
+                        "reason":      seal["reason"],
+                    },
+                )
+                logger.info(
+                    "orchestrator: %s → SEAL BLOCKED gate=%s",
+                    request_id, seal["failed_gate"],
+                )
 
     # ── Gate evaluation ────────────────────────────────────────────────────────
 

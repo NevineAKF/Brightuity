@@ -26,6 +26,7 @@ Engine is read-only: this file NEVER modifies agents/ or shared/.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -99,6 +100,10 @@ class AssetTokenizerAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
     is self-contained.
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._in_flight: set[tuple[str, str]] = set()
+
     async def on_message(
         self,
         msg: PlatformMessage,
@@ -134,44 +139,52 @@ class AssetTokenizerAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             )
             return
 
-        await tools.send_message(
-            f"Designing token structure for `{request_id}`… "
-            "(GPT-4o structuring — may take a few seconds)",
-            mentions=[sender],
-        )
-
+        key = (room_id, request_id)
+        if key in self._in_flight:
+            logger.debug("Tokenizer: duplicate @mention for %s in room %s — ignoring", request_id, room_id)
+            return
+        self._in_flight.add(key)
         try:
-            result = design_token_structure(client)
-        except Exception as exc:
-            logger.exception("design_token_structure failed for %s", request_id)
             await tools.send_message(
-                f"Token structure design failed for `{request_id}`: {exc}",
+                f"Designing token structure for `{request_id}`… "
+                "(GPT-4o structuring — may take a few seconds)",
                 mentions=[sender],
             )
-            return
 
-        reply = _format_reply(request_id, result)
-        await tools.send_message(reply, mentions=[sender])
+            try:
+                result = await asyncio.to_thread(design_token_structure, client)
+            except Exception as exc:
+                logger.exception("design_token_structure failed for %s", request_id)
+                await tools.send_message(
+                    f"Token structure design failed for `{request_id}`: {exc}",
+                    mentions=[sender],
+                )
+                return
 
-        metadata: dict[str, Any] = {
-            "agent":               "asset_tokenizer",
-            "request_id":          request_id,
-            "verdict":             result.get("verdict"),
-            "token_standard":      result.get("token_standard"),
-            "total_tokens":        result.get("total_tokens"),
-            "value_per_token_eur": result.get("value_per_token_eur"),
-            "model_used":          result.get("model_used"),
-            "was_fallback":        result.get("was_fallback"),
-            "latency_ms":          result.get("latency_ms"),
-        }
-        await tools.send_event(
-            content=f"token_structure_result:{request_id}",
-            message_type="tool_result",
-            metadata=metadata,
-        )
-        logger.info(
-            "Token structure posted to Band room %s — %s → %s (%s, %d tokens @ EUR %.2f)",
-            room_id, request_id, result.get("verdict"),
-            result.get("token_standard"), result.get("total_tokens", 0),
-            result.get("value_per_token_eur", 0.0),
-        )
+            reply = _format_reply(request_id, result)
+            await tools.send_message(reply, mentions=[sender])
+
+            metadata: dict[str, Any] = {
+                "agent":               "asset_tokenizer",
+                "request_id":          request_id,
+                "verdict":             result.get("verdict"),
+                "token_standard":      result.get("token_standard"),
+                "total_tokens":        result.get("total_tokens"),
+                "value_per_token_eur": result.get("value_per_token_eur"),
+                "model_used":          result.get("model_used"),
+                "was_fallback":        result.get("was_fallback"),
+                "latency_ms":          result.get("latency_ms"),
+            }
+            await tools.send_event(
+                content=f"token_structure_result:{request_id}",
+                message_type="tool_result",
+                metadata=metadata,
+            )
+            logger.info(
+                "Token structure posted to Band room %s — %s → %s (%s, %d tokens @ EUR %.2f)",
+                room_id, request_id, result.get("verdict"),
+                result.get("token_standard"), result.get("total_tokens", 0),
+                result.get("value_per_token_eur", 0.0),
+            )
+        finally:
+            self._in_flight.discard(key)

@@ -21,6 +21,7 @@ Engine is read-only: this file NEVER modifies agents/ or shared/.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -89,6 +90,10 @@ class DocAuditorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
     is self-contained.
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._in_flight: set[tuple[str, str]] = set()
+
     async def on_message(
         self,
         msg: PlatformMessage,
@@ -126,40 +131,48 @@ class DocAuditorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             )
             return
 
-        await tools.send_message(
-            f"Running document audit for `{request_id}`… "
-            "(this may take a few seconds)",
-            mentions=[sender],
-        )
-
+        key = (room_id, request_id)
+        if key in self._in_flight:
+            logger.debug("DocAuditor: duplicate @mention for %s in room %s — ignoring", request_id, room_id)
+            return
+        self._in_flight.add(key)
         try:
-            result = audit_documents(client)
-        except Exception as exc:
-            logger.exception("audit_documents failed for %s", request_id)
             await tools.send_message(
-                f"Document audit failed for `{request_id}`: {exc}",
+                f"Running document audit for `{request_id}`… "
+                "(this may take a few seconds)",
                 mentions=[sender],
             )
-            return
 
-        reply = _format_reply(request_id, result)
-        await tools.send_message(reply, mentions=[sender])
+            try:
+                result = await asyncio.to_thread(audit_documents, client)
+            except Exception as exc:
+                logger.exception("audit_documents failed for %s", request_id)
+                await tools.send_message(
+                    f"Document audit failed for `{request_id}`: {exc}",
+                    mentions=[sender],
+                )
+                return
 
-        metadata: dict[str, Any] = {
-            "agent":        "doc_auditor",
-            "request_id":   request_id,
-            "verdict":      result.get("verdict"),
-            "issues_found": result.get("issues_found"),
-            "model_used":   result.get("model_used"),
-            "was_fallback": result.get("was_fallback"),
-            "latency_ms":   result.get("latency_ms"),
-        }
-        await tools.send_event(
-            content=f"doc_audit_result:{request_id}",
-            message_type="tool_result",
-            metadata=metadata,
-        )
-        logger.info(
-            "Doc audit posted to Band room %s — %s → %s",
-            room_id, request_id, result.get("verdict"),
-        )
+            reply = _format_reply(request_id, result)
+            await tools.send_message(reply, mentions=[sender])
+
+            metadata: dict[str, Any] = {
+                "agent":        "doc_auditor",
+                "request_id":   request_id,
+                "verdict":      result.get("verdict"),
+                "issues_found": result.get("issues_found"),
+                "model_used":   result.get("model_used"),
+                "was_fallback": result.get("was_fallback"),
+                "latency_ms":   result.get("latency_ms"),
+            }
+            await tools.send_event(
+                content=f"doc_audit_result:{request_id}",
+                message_type="tool_result",
+                metadata=metadata,
+            )
+            logger.info(
+                "Doc audit posted to Band room %s — %s → %s",
+                room_id, request_id, result.get("verdict"),
+            )
+        finally:
+            self._in_flight.discard(key)

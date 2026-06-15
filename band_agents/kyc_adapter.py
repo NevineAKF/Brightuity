@@ -19,6 +19,7 @@ anything other than the public screen_kyc() call. The engine is read-only here.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -104,6 +105,12 @@ class KycAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
     is self-contained.
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        # Tracks (room_id, request_id) pairs currently being processed.
+        # Prevents a redelivered @mention from triggering a duplicate engine call.
+        self._in_flight: set[tuple[str, str]] = set()
+
     async def on_message(
         self,
         msg: PlatformMessage,
@@ -143,48 +150,56 @@ class KycAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             )
             return
 
-        await tools.send_message(
-            f"Running KYC screening for `{request_id}`… (this may take a few seconds)",
-            mentions=[sender],
-        )
-
+        key = (room_id, request_id)
+        if key in self._in_flight:
+            logger.debug("KYC: duplicate @mention for %s in room %s — ignoring", request_id, room_id)
+            return
+        self._in_flight.add(key)
         try:
-            result = screen_kyc(client)
-        except Exception as exc:
-            logger.exception("screen_kyc failed for %s", request_id)
             await tools.send_message(
-                f"KYC screening failed for `{request_id}`: {exc}",
+                f"Running KYC screening for `{request_id}`… (this may take a few seconds)",
                 mentions=[sender],
             )
-            return
 
-        # Human-readable verdict.
-        reply = _format_reply(request_id, result)
-        await tools.send_message(reply, mentions=[sender])
+            try:
+                result = await asyncio.to_thread(screen_kyc, client)
+            except Exception as exc:
+                logger.exception("screen_kyc failed for %s", request_id)
+                await tools.send_message(
+                    f"KYC screening failed for `{request_id}`: {exc}",
+                    mentions=[sender],
+                )
+                return
 
-        # Structured metadata for downstream tooling (no PII).
-        screening = result.get("screening_result") or {}
-        metadata: dict[str, Any] = {
-            "agent":        "kyc_guardian",
-            "request_id":   request_id,
-            "verdict":      result.get("verdict"),
-            "match_type":   screening.get("match_type"),
-            "match_score":  screening.get("match_score"),
-            "watchlist_id": (
-                screening.get("watchlist_id")
-                or (screening.get("matched_entry") or {}).get("id")
-            ),
-            "sources_checked": screening.get("sources_checked"),
-            "model_used":   result.get("model_used"),
-            "was_fallback": result.get("was_fallback"),
-            "latency_ms":   result.get("latency_ms"),
-        }
-        await tools.send_event(
-            content=f"kyc_screening_result:{request_id}",
-            message_type="tool_result",
-            metadata=metadata,
-        )
-        logger.info(
-            "KYC screening posted to Band room %s — %s → %s",
-            room_id, request_id, result.get("verdict"),
-        )
+            # Human-readable verdict.
+            reply = _format_reply(request_id, result)
+            await tools.send_message(reply, mentions=[sender])
+
+            # Structured metadata for downstream tooling (no PII).
+            screening = result.get("screening_result") or {}
+            metadata: dict[str, Any] = {
+                "agent":        "kyc_guardian",
+                "request_id":   request_id,
+                "verdict":      result.get("verdict"),
+                "match_type":   screening.get("match_type"),
+                "match_score":  screening.get("match_score"),
+                "watchlist_id": (
+                    screening.get("watchlist_id")
+                    or (screening.get("matched_entry") or {}).get("id")
+                ),
+                "sources_checked": screening.get("sources_checked"),
+                "model_used":   result.get("model_used"),
+                "was_fallback": result.get("was_fallback"),
+                "latency_ms":   result.get("latency_ms"),
+            }
+            await tools.send_event(
+                content=f"kyc_screening_result:{request_id}",
+                message_type="tool_result",
+                metadata=metadata,
+            )
+            logger.info(
+                "KYC screening posted to Band room %s — %s → %s",
+                room_id, request_id, result.get("verdict"),
+            )
+        finally:
+            self._in_flight.discard(key)

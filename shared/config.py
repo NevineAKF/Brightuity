@@ -140,16 +140,16 @@ AGENT_MODEL_CHAINS: dict[str, ModelChain] = {
         fallback_json_mode="schema",
     ),
 
-    # ── Doc Auditor (Featherless) ───────────────────────────────────────────
+    # ── Doc Auditor (AI/ML API) ────────────────────────────────────────────
     # First gate. Examines deeds, extracts fields, flags document issues.
-    # Qwen3.6-27B probe: json_object → EMPTY (stop); plain → clean JSON ✓
-    # Gemma-4-E4B-it: not probed; treat as plain (same platform behaviour).
+    # Switched from Featherless (Phase 2j): Gemini 3.5 Flash primary for speed.
+    # gpt-4o fallback: json_schema strict confirmed ✓ (same as KYC, Tokenizer).
     "doc_auditor": ModelChain(
-        primary="Qwen/Qwen3.6-27B",
-        fallback="google/gemma-4-E4B-it",
-        platform=Platform.FEATHERLESS,
-        primary_json_mode="plain",
-        fallback_json_mode="plain",
+        primary="google/gemini-3-5-flash",
+        fallback="gpt-4o",
+        platform=Platform.AIMLAPI,
+        primary_json_mode="schema",
+        fallback_json_mode="schema",
     ),
 
     # ── KYC Guardian (AI/ML API) ────────────────────────────────────────────
@@ -174,15 +174,16 @@ AGENT_MODEL_CHAINS: dict[str, ModelChain] = {
         fallback_json_mode="schema",
     ),
 
-    # ── Stress-Test Simulator (Featherless) ─────────────────────────────────
-    # Quantitative risk analysis. DeepSeek-V4: json_object ✓ (json_schema 400s).
-    # Qwen3 fallback: json_object → EMPTY; plain → clean JSON ✓
+    # ── Stress-Test Simulator (AI/ML API) ───────────────────────────────────
+    # Quantitative risk analysis.
+    # Switched from Featherless (Phase 2j): Gemini 3.5 Flash primary for speed.
+    # gpt-4o fallback: json_schema strict confirmed ✓ (same as KYC, Tokenizer).
     "stress_test": ModelChain(
-        primary="deepseek-ai/DeepSeek-V4-Pro",
-        fallback="Qwen/Qwen3.6-27B",
-        platform=Platform.FEATHERLESS,
-        primary_json_mode="object",
-        fallback_json_mode="plain",
+        primary="google/gemini-3-5-flash",
+        fallback="gpt-4o",
+        platform=Platform.AIMLAPI,
+        primary_json_mode="schema",
+        fallback_json_mode="schema",
     ),
 
     # ── Asset Tokenizer (AI/ML API) ─────────────────────────────────────────

@@ -27,6 +27,7 @@ Engine is read-only: this file NEVER modifies agents/ or shared/.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -112,6 +113,10 @@ class StressTestAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
     is self-contained.
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._in_flight: set[tuple[str, str]] = set()
+
     async def on_message(
         self,
         msg: PlatformMessage,
@@ -147,43 +152,51 @@ class StressTestAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             )
             return
 
-        await tools.send_message(
-            f"Running stress-test for `{request_id}`… "
-            "(deterministic risk engine + DeepSeek narrative)",
-            mentions=[sender],
-        )
-
+        key = (room_id, request_id)
+        if key in self._in_flight:
+            logger.debug("StressTest: duplicate @mention for %s in room %s — ignoring", request_id, room_id)
+            return
+        self._in_flight.add(key)
         try:
-            result = run_stress_test(client)
-        except Exception as exc:
-            logger.exception("run_stress_test failed for %s", request_id)
             await tools.send_message(
-                f"Stress-test failed for `{request_id}`: {exc}",
+                f"Running stress-test for `{request_id}`… "
+                "(deterministic risk engine + DeepSeek narrative)",
                 mentions=[sender],
             )
-            return
 
-        reply = _format_reply(request_id, result)
-        await tools.send_message(reply, mentions=[sender])
+            try:
+                result = await asyncio.to_thread(run_stress_test, client)
+            except Exception as exc:
+                logger.exception("run_stress_test failed for %s", request_id)
+                await tools.send_message(
+                    f"Stress-test failed for `{request_id}`: {exc}",
+                    mentions=[sender],
+                )
+                return
 
-        rm = result.get("risk_metrics") or {}
-        metadata: dict[str, Any] = {
-            "agent":        "stress_test",
-            "request_id":   request_id,
-            "verdict":      result.get("verdict"),
-            "risk_score":   rm.get("risk_score"),
-            "risk_band":    result.get("risk_level"),   # engine field name is risk_level
-            "model_used":   result.get("model_used"),
-            "was_fallback": result.get("was_fallback"),
-            "latency_ms":   result.get("latency_ms"),
-        }
-        await tools.send_event(
-            content=f"stress_test_result:{request_id}",
-            message_type="tool_result",
-            metadata=metadata,
-        )
-        logger.info(
-            "Stress-test posted to Band room %s — %s → %s (risk_score=%s risk_band=%s)",
-            room_id, request_id, result.get("verdict"),
-            rm.get("risk_score"), result.get("risk_level"),
-        )
+            reply = _format_reply(request_id, result)
+            await tools.send_message(reply, mentions=[sender])
+
+            rm = result.get("risk_metrics") or {}
+            metadata: dict[str, Any] = {
+                "agent":        "stress_test",
+                "request_id":   request_id,
+                "verdict":      result.get("verdict"),
+                "risk_score":   rm.get("risk_score"),
+                "risk_band":    result.get("risk_level"),   # engine field name is risk_level
+                "model_used":   result.get("model_used"),
+                "was_fallback": result.get("was_fallback"),
+                "latency_ms":   result.get("latency_ms"),
+            }
+            await tools.send_event(
+                content=f"stress_test_result:{request_id}",
+                message_type="tool_result",
+                metadata=metadata,
+            )
+            logger.info(
+                "Stress-test posted to Band room %s — %s → %s (risk_score=%s risk_band=%s)",
+                room_id, request_id, result.get("verdict"),
+                rm.get("risk_score"), result.get("risk_level"),
+            )
+        finally:
+            self._in_flight.discard(key)
