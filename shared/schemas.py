@@ -63,6 +63,20 @@ class StressTestVerdict(BaseModel):
     risk_factors: list[str]
 
 
+class StressTestNarrative(BaseModel):
+    """
+    LLM-only output contract for the Stress-Test Simulator.
+
+    The deterministic risk engine (risk_engine.py) computes risk_score,
+    risk_level, stressed_value_range, and verdict. The LLM produces only
+    the interpretive narrative: summary and enriched risk_factors.
+    verdict and risk_level are NOT produced by the LLM — they are
+    overridden with engine values in logic.py.
+    """
+    summary:      str
+    risk_factors: list[str]
+
+
 class AssetTokenizerVerdict(BaseModel):
     """
     Output contract for the Asset Tokenizer agent.

@@ -106,6 +106,22 @@ def _show_verdict(result: dict) -> None:
     print(f"     was_fallback : {result['was_fallback']}")
     print(f"     latency_ms   : {result['latency_ms']}")
 
+    rm = result.get("risk_metrics")
+    if rm:
+        sv = rm["stressed_value_range"]
+        sc = rm["score_components"]
+        print()
+        print(f"  [ENGINE]  DETERMINISTIC RISK METRICS  (no LLM involvement)")
+        print(f"     risk_score      : {rm['risk_score']}/100  "
+              f"(illiq={sc['illiquidity_score']} + vol={sc['volatility_score']} "
+              f"+ conc={sc['concentration_score']} + flags={sc['flags_score']})")
+        print(f"     illiq_discount  : {rm['illiquidity_discount']:.0%}  "
+              f"mkt_volatility: {rm['market_volatility']:.0%}")
+        print(f"     worst_case      : EUR {sv['worst_case_eur']:>12,.0f}")
+        print(f"     base_case       : EUR {sv['base_case_eur']:>12,.0f}")
+        print(f"     best_case       : EUR {sv['best_case_eur']:>12,.0f}")
+        print(f"     methodology     : {rm['methodology']}")
+
 
 # ── Test runner ────────────────────────────────────────────────────────────────
 
@@ -117,7 +133,7 @@ def run_test(label: str, request_id: str, note: str = "") -> dict:
     client = _load_client(request_id)
     print("  INPUT TO STRESS-TEST SIMULATOR (KYC/docs/expected_outcome excluded):")
     _show_input(client)
-    print("  Calling model... (deepseek-ai/DeepSeek-V4-Pro on Featherless)")
+    print("  Calling engine + model... (deterministic engine first, then DeepSeek-V4-Pro on Featherless for narrative)")
     print()
     result = run_stress_test(client)
     print()
@@ -180,19 +196,23 @@ if __name__ == "__main__":
     print(_SEP2)
 
     for label, result in results:
-        verdict = result["verdict"]
+        verdict    = result["verdict"]
         risk_level = result.get("risk_level", "unknown")
-        risk_icon = _RISK_ICON.get(risk_level, "")
-        verdict_icon = _PASS if verdict == "pass" else _FAIL
+        risk_icon  = _RISK_ICON.get(risk_level, "")
+        v_icon     = _PASS if verdict == "pass" else _FAIL
+        rm         = result.get("risk_metrics", {})
+        score      = rm.get("risk_score", "--")
+        sv         = rm.get("stressed_value_range", {})
+        worst      = sv.get("worst_case_eur")
+        worst_str  = f"EUR {worst:,.0f}" if worst else "--"
         print(
-            f"  {verdict_icon}  {label:<45}  "
-            f"verdict={verdict:<4}  risk={risk_level}"
-            f"  {risk_icon}"
+            f"  {v_icon}  {label:<45}  "
+            f"score={score:<3}  risk={risk_level:<8}  worst={worst_str}  {risk_icon}"
         )
 
     print()
-    print("  Differentiated risk reasoning proves outcomes emerge from asset data.")
-    print("  Three different assets, three different risk profiles.")
+    print("  ENGINE NUMBERS ARE DETERMINISTIC — same inputs produce identical scores.")
+    print("  Three different assets, three differentiated engine-computed risk profiles.")
     print(_SEP2)
     print()
     sys.exit(0)
