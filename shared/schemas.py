@@ -75,3 +75,24 @@ class AssetTokenizerVerdict(BaseModel):
     total_tokens:        int     # proposed total supply
     value_per_token_eur: float   # nominal EUR value per token
     structure_notes:     list[str]  # key parameters, assumptions, caveats
+
+
+class OrchestratorBriefing(BaseModel):
+    """
+    Output contract for the Orchestrator Layer 2 synthesis (Claude Opus 4.8).
+
+    Produced AFTER the deterministic Layer 1 (gates + ECDSA seal) has fully
+    completed. The briefing describes what Layer 1 decided — it has zero
+    authority to change or contradict those decisions.
+
+    Drives both:
+      1. Request-time: json_schema strict sent to AI/ML API so Claude is
+         constrained to this exact structure before we see the response.
+      2. Response-time: model_validate() ensures the response conforms before
+         it is attached to decision_record["briefing"].
+    """
+    headline:          str        # one line: outcome statement (e.g. "HALTED — KYC PEP match")
+    decisive_factor:   str        # the single most important reason for the outcome
+    per_agent_summary: list[str]  # one concise line per specialist agent that ran
+    recommendation:    str        # advised action for the Head of Digital Assets;
+                                  # must explicitly leave final approve/reject to the human
