@@ -74,9 +74,12 @@ Public interface:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
+
+import httpx
 
 from agents.doc_auditor.logic import audit_documents
 from agents.kyc_guardian.logic import screen_kyc
@@ -85,6 +88,7 @@ from agents.stress_test.logic import run_stress_test
 from agents.asset_tokenizer.logic import design_token_structure
 from agents.consensus_signer.logic import ConsensusSigner
 from agents.orchestrator.synthesis import synthesize_briefing
+from shared.config import AGENT_HTTP_URLS
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +96,35 @@ logger = logging.getLogger(__name__)
 # One instance per process — the public key is stable within a session.
 # In production: inject a persistent HSM-backed key (never ephemeral in-memory).
 _signer = ConsensusSigner()
+
+
+# ── HTTP transport helpers (used when AGENT_TRANSPORT=http) ────────────────────
+
+def _http_call(agent_name: str, client_record: dict) -> dict:
+    """
+    Call a remote agent's POST /run endpoint and return its verdict dict.
+
+    Used when AGENT_TRANSPORT=http. On any network or HTTP error the exception
+    propagates to _safe_call, which catches it and applies the same conservative
+    safe default as for in-process exceptions — kyc_guardian defaults to "halt",
+    all others to "fail". No special handling needed here.
+
+    Timeout is 180s — covers the slowest models (Gemini 2.5 Pro thinking, ~24s
+    measured) with generous headroom. The caller's ThreadPoolExecutor is unaffected
+    since this is a blocking sync call inside an already-threaded context.
+    """
+    url = AGENT_HTTP_URLS[agent_name]
+    response = httpx.post(f"{url}/run", json=client_record, timeout=180.0)
+    response.raise_for_status()
+    return response.json()
+
+
+def _make_http_agent(agent_name: str) -> Callable[[dict], dict]:
+    """Return a callable matching the standard agent signature that calls over HTTP."""
+    def _call(client_record: dict) -> dict:
+        return _http_call(agent_name, client_record)
+    return _call
+
 
 # ── Pipeline status constants ──────────────────────────────────────────────────
 STATUS_APPROVED_PENDING = "approved_pending_human"
@@ -387,14 +420,28 @@ def run_pipeline(
         logger.info("orchestrator: %s", entry)
 
     # ── Agent function table ───────────────────────────────────────────────────
-    real_agents: dict[str, Callable] = {
-        "doc_auditor":        audit_documents,
-        "kyc_guardian":       screen_kyc,
-        "dynamic_compliance": assess_compliance,
-        "stress_test":        run_stress_test,
-        "asset_tokenizer":    design_token_structure,
-        "consensus_signer":   _signer.seal,
-    }
+    # Transport switch: read at call time so tests can set AGENT_TRANSPORT in
+    # os.environ without restarting the process. _agent_overrides always win
+    # over whichever transport is selected — the existing mock tests are untouched.
+    _transport = os.getenv("AGENT_TRANSPORT", "inprocess")
+    if _transport == "http":
+        real_agents: dict[str, Callable] = {
+            "doc_auditor":        _make_http_agent("doc_auditor"),
+            "kyc_guardian":       _make_http_agent("kyc_guardian"),
+            "dynamic_compliance": _make_http_agent("dynamic_compliance"),
+            "stress_test":        _make_http_agent("stress_test"),
+            "asset_tokenizer":    _make_http_agent("asset_tokenizer"),
+            "consensus_signer":   _signer.seal,
+        }
+    else:
+        real_agents: dict[str, Callable] = {
+            "doc_auditor":        audit_documents,
+            "kyc_guardian":       screen_kyc,
+            "dynamic_compliance": assess_compliance,
+            "stress_test":        run_stress_test,
+            "asset_tokenizer":    design_token_structure,
+            "consensus_signer":   _signer.seal,
+        }
     agents: dict[str, Callable] = {**real_agents, **(_agent_overrides or {})}
 
     _emit("pipeline_start")

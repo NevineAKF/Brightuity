@@ -12,8 +12,9 @@ It produces a structure recommendation for review and sign-off by the Head of
 Digital Assets. Scope is tokenisation structure design ONLY — not KYC, market
 risk, or regulatory compliance.
 
-Model: zai-org/GLM-4.6 (plain mode) on Featherless as primary;
-       Qwen/Qwen3.6-27B (plain mode) as fallback.
+Model: gpt-4o (schema mode) on AI/ML API as primary;
+       google/gemini-2.5-pro (schema mode) on AI/ML API as fallback.
+       (GLM-4.6 demoted 2026-06-15: correct output but ~98s/call vs GPT-4o ~3s — 25-45x too slow.)
        (Kimi-K2.6 demoted 2026-06-14: correct output but 2–4 min/call, too slow.)
 
 Public interface:

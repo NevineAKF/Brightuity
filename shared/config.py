@@ -185,21 +185,46 @@ AGENT_MODEL_CHAINS: dict[str, ModelChain] = {
         fallback_json_mode="plain",
     ),
 
-    # ── Asset Tokenizer (Featherless) ───────────────────────────────────────
+    # ── Asset Tokenizer (AI/ML API) ─────────────────────────────────────────
     # Designs ERC-3643 token structure.
-    # GLM-4.6 promoted to primary after probe (2026-06-14): correct structures,
-    # math ±0.0%, 1.5–3.3× faster than Kimi-K2.6 (37–148 s vs 121–238 s).
-    # Kimi-K2.6 demoted — valid output but unacceptably slow for live pipeline.
-    # Qwen3.6-27B fallback: plain mode confirmed ✓ from structured-output probe.
+    # GPT-4o promoted to primary after probe (2026-06-15): correct structures,
+    # math ±0.0%, 20–45× faster than GLM-4.6 (~3 s vs ~98 s/call).
+    # GLM-4.6 demoted — valid output but ~98s/call, too slow for live pipeline.
+    # Kimi-K2.6 previously demoted (2026-06-14) for same reason (2–4 min/call).
+    # Gemini 2.5 Pro fallback: schema mode on AI/ML API confirmed OK.
     "asset_tokenizer": ModelChain(
-        primary="zai-org/GLM-4.6",
-        fallback="Qwen/Qwen3.6-27B",
-        platform=Platform.FEATHERLESS,
-        primary_json_mode="plain",
-        fallback_json_mode="plain",
+        primary="gpt-4o",
+        fallback="google/gemini-2.5-pro",
+        platform=Platform.AIMLAPI,
+        primary_json_mode="schema",
+        fallback_json_mode="schema",
     ),
 
     # consensus_signer is intentionally absent — it uses ECDSA, no LLM.
+}
+
+
+# ── Agent HTTP service URLs (used when AGENT_TRANSPORT=http) ──────────────────
+#
+# When AGENT_TRANSPORT=http (set in environment), the orchestrator calls each
+# agent over HTTP instead of importing it in-process. These URLs point to the
+# FastAPI services defined in agents/<name>/service.py.
+#
+# Defaults are localhost ports for local development. In Docker Compose, override
+# each URL via the corresponding environment variable to reach the container.
+#
+# Port assignments:
+#   doc_auditor        → 8001
+#   kyc_guardian       → 8002
+#   dynamic_compliance → 8003
+#   stress_test        → 8004
+#   asset_tokenizer    → 8005
+AGENT_HTTP_URLS: dict[str, str] = {
+    "doc_auditor":        os.getenv("DOC_AUDITOR_URL",        "http://localhost:8001"),
+    "kyc_guardian":       os.getenv("KYC_GUARDIAN_URL",       "http://localhost:8002"),
+    "dynamic_compliance": os.getenv("DYNAMIC_COMPLIANCE_URL", "http://localhost:8003"),
+    "stress_test":        os.getenv("STRESS_TEST_URL",        "http://localhost:8004"),
+    "asset_tokenizer":    os.getenv("ASSET_TOKENIZER_URL",    "http://localhost:8005"),
 }
 
 

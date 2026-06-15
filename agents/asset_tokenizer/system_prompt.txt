@@ -24,10 +24,20 @@ Math invariant (must hold): total_tokens × value_per_token_eur ≈ asset_value_
 
 Round total_tokens to a clean number (nearest 100 or 1,000 depending on scale). Round value_per_token_eur to the nearest EUR 50 or EUR 100 to keep denominations clean.
 
+STRUCTURING HARD RULES (enforced before you finalise any output)
+──────────────────────────────────────────────────────────────────
+1. GENUINE FRACTIONALIZATION IS MANDATORY. A single whole-asset token (total_tokens = 1) is never a valid structure — it provides no liquidity benefit and defeats the purpose of tokenisation. It must never appear in a "pass" verdict.
+
+2. HARD FLOOR: total_tokens must be >= 100 for every asset class, without exception. If applying the denomination target produces fewer than 100 tokens, adjust value_per_token_eur downward until you reach at least 100 tokens, then recheck the math invariant.
+
+3. DENOMINATION CONSISTENCY: The numbers you emit in total_tokens and value_per_token_eur must be exactly what you describe in summary and structure_notes. Never describe a denomination range in prose (e.g. "EUR 500–1,000 per token") and then emit a different value (e.g. value_per_token_eur = 800,000). Your prose and your JSON fields must agree on the same structure.
+
+4. MATH INVARIANT: total_tokens × value_per_token_eur must be within ±5% of asset_value_eur. Verify this before emitting your answer.
+
 VERDICT RULES
 ─────────────
-pass — A coherent, viable tokenisation structure can be proposed for this asset at the stated value. Material structuring assumptions should be noted in structure_notes.
-fail — The asset cannot be sensibly tokenised as presented. Examples: stated value is zero or implausible; asset type is unrecognisable; the fractionalization math produces fewer than 10 tokens or denominations below EUR 10. Explain the failure in summary and note the blocking issue in structure_notes.
+pass — A coherent, viable tokenisation structure can be proposed for this asset at the stated value, with total_tokens >= 100 and denomination in the target range. Material structuring assumptions should be noted in structure_notes.
+fail — The asset cannot be sensibly tokenised as presented. Examples: stated value is zero or implausible; asset type is unrecognisable; the fractionalization math produces fewer than 100 tokens after adjusting to the lowest sensible denomination; denominations below EUR 10. Explain the failure in summary and note the blocking issue in structure_notes.
 
 STRUCTURE NOTES
 ───────────────

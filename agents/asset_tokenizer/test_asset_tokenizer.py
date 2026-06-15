@@ -16,9 +16,9 @@ Test cases:
 The proof: the model proposes DIFFERENT structures per asset. The fractionalization
 math should verify: total_tokens × value_per_token_eur ≈ asset_value_eur (±5%).
 
-ALSO WATCH: was_fallback flag and log output. If Kimi-K2.6 returns empty/invalid
-responses and GLM-4.6 carries the calls instead, this will surface in the logs
-and was_fallback=True. Report this clearly — do not hide Kimi failures.
+ALSO WATCH: was_fallback flag and log output. If GPT-4o fails and Gemini 2.5 Pro
+carries the call instead, this will surface in the logs and was_fallback=True.
+Report this clearly — do not hide primary failures.
 
 Run: python -m agents.asset_tokenizer.test_asset_tokenizer
   or: python agents/asset_tokenizer/test_asset_tokenizer.py
@@ -100,7 +100,7 @@ def _show_verdict(result: dict) -> None:
             print(f"     structure_note    : {n}")
     else:
         print(f"     structure_notes   : (none)")
-    fallback_flag = "YES ← KIMI FAILED, GLM CARRIED" if result["was_fallback"] else "no"
+    fallback_flag = "YES ← GPT-4o FAILED, GEMINI CARRIED" if result["was_fallback"] else "no"
     print(f"     model_used        : {result['model_used']}")
     print(f"     was_fallback      : {fallback_flag}")
     print(f"     latency_ms        : {result['latency_ms']}")
@@ -117,7 +117,7 @@ def run_test(label: str, request_id: str, note: str = "") -> dict:
     client = _load_client(request_id)
     print("  INPUT TO ASSET TOKENIZER (KYC/docs/expected_outcome excluded):")
     _show_input(client)
-    print("  Calling model... (zai-org/GLM-4.6 on Featherless — Qwen/Qwen3.6-27B fallback)")
+    print("  Calling model... (gpt-4o on AI/ML API — google/gemini-2.5-pro fallback)")
     print()
     result = design_token_structure(client)
     print()
@@ -204,10 +204,10 @@ if __name__ == "__main__":
 
     print()
     if any_fallback:
-        print("  ⚠  GLM-4.6 FAILED on one or more calls — Qwen/Qwen3.6-27B carried those requests.")
+        print("  ⚠  GPT-4o FAILED on one or more calls — google/gemini-2.5-pro carried those requests.")
         print("     Review was_fallback flags above.")
     else:
-        print("  GLM-4.6 (primary) handled all calls — no fallback triggered.")
+        print("  GPT-4o (primary) handled all calls — no fallback triggered.")
 
     print()
     if all_math_ok:
