@@ -1,0 +1,310 @@
+"""
+backend/case_store.py
+Brightuity — SQLite case record repository (Phase 1).
+
+Repository pattern: ALL SQLite access lives here and only here.
+main.py and tests never import sqlite3 directly.
+
+Swapping SQLite → PostgreSQL (Phase 2) means:
+  1. Replace _connect() with an asyncpg pool.
+  2. Translate ? placeholders to $1 / $2 / … (asyncpg style).
+  3. Replace TEXT JSON columns with JSONB.
+  Everything above init_db() in main.py stays unchanged.
+
+Schema design:
+  Mirrors database/schema_db1.sql `cases` table (SQLite dialect).
+  Key dialect translations:
+    SERIAL            → INTEGER PRIMARY KEY AUTOINCREMENT
+    JSONB             → TEXT  (JSON serialized as string)
+    NOW()             → strftime('%Y-%m-%dT%H:%M:%SZ','now')
+    REFERENCES clause → omitted (clients live in JSON, not in this DB)
+  Three columns added beyond schema_db1.sql:
+    pipeline_status   — orchestrator value; queryable without parsing JSON
+    seal_status       — "sealed" | "blocked"; queryable without parsing JSON
+    evidence_package  — full EvidencePackage JSON assembled by governance_audit
+    decision_record_json — full orchestrator decision_record JSON
+
+PII policy:
+  full_name, passport_number, date_of_birth, address are NOT stored here.
+  They remain in Zone 1 (brightuity_clients.json → DB1 PostgreSQL in Phase 2).
+  This table holds only non-PII operational fields consistent with the
+  field-whitelisting already enforced in main.py.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
+
+logger = logging.getLogger(__name__)
+
+
+# ── Configuration ─────────────────────────────────────────────────────────────
+
+def get_db_path() -> Path:
+    """
+    Return the SQLite database file path.
+
+    Reads CASES_DB_PATH from environment at call time (not import time) so
+    tests can override via os.environ without module reloading.
+    Default: <project_root>/database/brightuity_cases.db
+    """
+    default = str(
+        Path(__file__).parent.parent / "database" / "brightuity_cases.db"
+    )
+    return Path(os.getenv("CASES_DB_PATH", default))
+
+
+# ── DDL ───────────────────────────────────────────────────────────────────────
+
+_CREATE_CASES = """
+CREATE TABLE IF NOT EXISTS cases (
+    id                   INTEGER  PRIMARY KEY AUTOINCREMENT,
+    request_id           TEXT     NOT NULL UNIQUE,
+    status               TEXT     NOT NULL DEFAULT 'pending',
+
+    -- Initiation
+    initiated_by         TEXT,
+    initiated_at         TEXT,
+
+    -- Agent verdicts: compact per-agent summary (not full LLM payloads)
+    -- Schema: {"doc_auditor": {"verdict":…, "summary":…, "latency_ms":…, "model_used":…}, …}
+    agent_verdicts       TEXT     NOT NULL DEFAULT '{}',
+
+    -- Pipeline outcome (queryable without JSON parsing)
+    pipeline_status      TEXT,
+    gate_outcome         TEXT,
+
+    -- Seal fields (queryable without JSON parsing)
+    seal_status          TEXT,
+    consensus_hash       TEXT,
+    ecdsa_signature      TEXT,
+    sealed_at            TEXT,
+
+    -- Human decision (written when Head of Digital Assets signs — Phase 2)
+    completed_at         TEXT,
+    decision             TEXT,
+    decision_reason      TEXT     NOT NULL DEFAULT '',
+    decision_by          TEXT,
+    esignature_hash      TEXT,
+
+    -- Full JSON blobs (source of truth for detail views)
+    evidence_package     TEXT,
+    decision_record_json TEXT,
+
+    created_at           TEXT     NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    updated_at           TEXT     NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+)
+"""
+
+_IDX_STATUS     = "CREATE INDEX IF NOT EXISTS idx_cases_status     ON cases(status)"
+_IDX_REQUEST_ID = "CREATE INDEX IF NOT EXISTS idx_cases_request_id ON cases(request_id)"
+
+
+# ── Connection helper ─────────────────────────────────────────────────────────
+
+def _connect() -> sqlite3.Connection:
+    """
+    Open a new SQLite connection.
+
+    WAL mode: allows concurrent readers while a writer holds the lock.
+    check_same_thread=False: safe because we never share a connection across
+    threads — each call to _connect() opens its own connection.
+    """
+    path = get_db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+# ── Public interface ──────────────────────────────────────────────────────────
+
+def init_db() -> None:
+    """
+    Idempotent schema initialiser. Safe to call on every startup.
+    Creates the cases table and indexes only if they don't already exist.
+    """
+    with _connect() as conn:
+        conn.execute(_CREATE_CASES)
+        conn.execute(_IDX_STATUS)
+        conn.execute(_IDX_REQUEST_ID)
+    logger.info("case_store: initialised at %s", get_db_path())
+
+
+def create_case_record(
+    request_id: str,
+    status: str = "pending",
+    initiated_by: str | None = None,
+) -> dict[str, Any]:
+    """
+    Insert a new case row and return it as a dict.
+
+    Raises sqlite3.IntegrityError (UNIQUE constraint) if request_id exists.
+    Callers should catch this and treat it as a 409 Conflict.
+    """
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO cases (request_id, status, initiated_by, initiated_at,
+                               created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (request_id, status, initiated_by, now, now, now),
+        )
+    result = get_case(request_id)
+    assert result is not None
+    return result
+
+
+def get_case(request_id: str) -> dict[str, Any] | None:
+    """Return the case row as a plain dict, or None if not found."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM cases WHERE request_id = ?", (request_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_cases(status: str | None = None) -> list[dict[str, Any]]:
+    """
+    Return all case rows, optionally filtered by status.
+    Ordered by created_at ascending (chronological submission order).
+    """
+    with _connect() as conn:
+        if status is not None:
+            rows = conn.execute(
+                "SELECT * FROM cases WHERE status = ? ORDER BY created_at ASC",
+                (status,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM cases ORDER BY created_at ASC"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_status(request_id: str, status: str) -> None:
+    """Update the lifecycle status of an existing case."""
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE cases SET status = ?, updated_at = ? WHERE request_id = ?",
+            (status, now, request_id),
+        )
+    logger.info("case_store: %s → %s", request_id, status)
+
+
+def save_pipeline_result(
+    request_id: str,
+    decision_record: dict[str, Any],
+    evidence_package: dict[str, Any],
+) -> None:
+    """
+    Persist the completed pipeline output for a case.
+
+    Writes all queryable scalar fields (pipeline_status, gate_outcome, seal fields)
+    plus the two full JSON blobs (evidence_package, decision_record_json).
+
+    Does NOT update case.status — call set_status() separately so the transition
+    is always validated by case_state.validate_transition().
+    """
+    seal   = decision_record.get("seal") or {}
+    agents = decision_record.get("agents") or {}
+
+    # Compact agent_verdicts: just the fields needed for audit queries.
+    # Full LLM output stays in decision_record_json only.
+    compact: dict[str, Any] = {}
+    for name, result in agents.items():
+        if result:
+            compact[name] = {
+                "verdict":    result.get("verdict"),
+                "summary":    (result.get("summary") or "")[:300],
+                "latency_ms": result.get("latency_ms"),
+                "model_used": result.get("model_used"),
+            }
+    compact["consensus_signer"] = {
+        "verdict":    seal.get("status"),
+        "hash":       seal.get("canonical_hash"),
+        "latency_ms": None,
+    }
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE cases SET
+                pipeline_status      = ?,
+                gate_outcome         = ?,
+                agent_verdicts       = ?,
+                seal_status          = ?,
+                consensus_hash       = ?,
+                ecdsa_signature      = ?,
+                sealed_at            = ?,
+                evidence_package     = ?,
+                decision_record_json = ?,
+                updated_at           = ?
+            WHERE request_id = ?
+            """,
+            (
+                decision_record.get("pipeline_status"),
+                decision_record.get("gate_outcome"),
+                json.dumps(compact, ensure_ascii=False),
+                seal.get("status"),
+                seal.get("canonical_hash"),
+                seal.get("signature"),
+                seal.get("sealed_at"),
+                json.dumps(evidence_package, ensure_ascii=False),
+                json.dumps(decision_record, ensure_ascii=False),
+                now,
+                request_id,
+            ),
+        )
+    logger.info(
+        "case_store: saved result for %s (pipeline_status=%s seal=%s)",
+        request_id,
+        decision_record.get("pipeline_status"),
+        seal.get("status"),
+    )
+
+
+def get_evidence_package(request_id: str) -> dict[str, Any] | None:
+    """
+    Return the stored EvidencePackage for a completed case.
+    Returns None if the case doesn't exist or the pipeline hasn't run yet.
+    """
+    case = get_case(request_id)
+    if not case or case.get("evidence_package") is None:
+        return None
+    return json.loads(case["evidence_package"])
+
+
+# ── Human authorization slot (Phase 2) ───────────────────────────────────────
+# save_human_authorization(
+#     request_id: str,
+#     decision: Literal["authorize", "reject"],
+#     decision_reason: str,
+#     decision_by: str,
+#     esignature_hash: str,
+# ) -> None
+#
+# This function will:
+#   1. Validate transition: awaiting_decision → authorized | rejected
+#   2. Write completed_at, decision, decision_reason, decision_by, esignature_hash
+#   3. Patch evidence_package JSON's human_authorization section in-place
+#   4. INSERT into audit_log (Phase 2: audit_log table from schema_db1.sql)
+#
+# Implementation deferred to Phase 2 (human authorize + e-signature endpoint).
+# ─────────────────────────────────────────────────────────────────────────────

@@ -16,11 +16,20 @@ Security model:
 from __future__ import annotations
 
 import json
+import logging
+import sqlite3
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+
+from backend import case_state, case_store
+from agents.orchestrator.orchestrator import run_pipeline
+from agents.governance_audit.logic import assemble_evidence_package
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Data layer — JSON loader
@@ -101,6 +110,16 @@ def _whitelist(client: dict[str, Any], fields: frozenset[str]) -> dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
+# Application lifespan
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    case_store.init_db()
+    yield
+
+
+# ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
 
@@ -111,9 +130,10 @@ app = FastAPI(
         "Serves client case data for the review pipeline. "
         "expected_outcome is never included in any response."
     ),
-    version="0.1.0",
+    version="0.2.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # CORS: restrict to the frontend origin.
@@ -123,13 +143,78 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
     allow_credentials=True,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
 
 # ---------------------------------------------------------------------------
-# Endpoints
+# Pipeline background task
+# ---------------------------------------------------------------------------
+
+def _run_pipeline_bg(
+    request_id: str,
+    client_record: dict[str, Any],
+    agent_overrides: dict | None,
+    synthesis_override: Any,
+) -> None:
+    """
+    Execute the full pipeline in a background thread.
+
+    Called by BackgroundTasks after the POST /cases/{id}/run response is sent.
+    Writes the result to the case store and advances the case status.
+
+    # ── Phase 2 Band live-streaming hook ───────────────────────────────────
+    # After each agent completes, the orchestrator emits events into event_log.
+    # Phase 2: iterate event_log here and forward each event to the Band room
+    # for this request_id via band_bridge.post_event(request_id, event).
+    # That delivers real-time @mentions to the Head of Digital Assets as each
+    # gate clears or fails — before the pipeline finishes.
+    # ───────────────────────────────────────────────────────────────────────
+    """
+    try:
+        decision_record, event_log = run_pipeline(
+            client_record,
+            _agent_overrides=agent_overrides or {},
+            _synthesis_override=synthesis_override,
+        )
+        evidence_package = assemble_evidence_package(
+            decision_record, event_log, client_record
+        )
+        case_store.save_pipeline_result(request_id, decision_record, evidence_package)
+
+        new_status = case_state.pipeline_status_to_case_status(
+            decision_record.get("pipeline_status", "error")
+        )
+        case_store.set_status(request_id, new_status)
+
+    except Exception as exc:
+        logger.error(
+            "pipeline background task failed for %s: %s", request_id, exc, exc_info=True
+        )
+        case_store.set_status(request_id, "error")
+
+
+# ---------------------------------------------------------------------------
+# Injectable pipeline overrides (dependency injection seam for testing)
+#
+# Production: both functions return None → run_pipeline uses real LLM agents.
+# Tests: override via app.dependency_overrides to inject mock agents/synthesis
+# without any real LLM calls. This seam must never be removed.
+# ---------------------------------------------------------------------------
+
+def _pipeline_agent_overrides() -> dict | None:
+    """Agent override dict for run_pipeline. None = use real LLM agents."""
+    return None
+
+
+def _pipeline_synthesis_override() -> Any:
+    """Synthesis override callable for run_pipeline. None = use real synthesis."""
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — existing (unchanged)
 # ---------------------------------------------------------------------------
 
 @app.get("/health", tags=["ops"])
@@ -194,3 +279,170 @@ def get_case(request_id: str) -> dict[str, Any]:
             detail=f"Case '{request_id}' not found.",
         )
     return _whitelist(client, _DETAIL_FIELDS)
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — pipeline execution + status (new)
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/cases/{request_id}/run",
+    status_code=202,
+    tags=["pipeline"],
+    summary="Trigger the compliance pipeline for a case",
+)
+async def run_case(
+    request_id: str,
+    background_tasks: BackgroundTasks,
+    force: bool = Query(
+        default=False,
+        description=(
+            "Re-run the pipeline even if a prior run exists. "
+            "Requires case to be in a re-runnable state "
+            "(awaiting_decision, halted, blocked_gate, error). "
+            "Never allowed while the pipeline is already running (status=processing)."
+        ),
+    ),
+    agent_overrides: dict | None = Depends(_pipeline_agent_overrides),
+    synthesis_override: Any = Depends(_pipeline_synthesis_override),
+) -> dict[str, Any]:
+    """
+    Kick off the 8-agent compliance pipeline for a client case.
+
+    Returns 202 Accepted immediately. The pipeline runs in a background thread
+    (~60-90 s for real LLM agents). Poll GET /cases/{id}/status for completion.
+
+    State machine:
+      pending           → processing (first run, no force needed)
+      awaiting_decision → processing (re-run, requires force=true)
+      halted            → processing (re-run, requires force=true)
+      blocked_gate      → processing (re-run, requires force=true)
+      error             → processing (retry, requires force=true)
+      processing        → 409 Conflict (pipeline already running)
+      authorized/rejected → 409 Conflict (terminal; create a new case)
+    """
+    # 1. Verify the client exists in Zone 1
+    client_record = _CLIENTS.get(request_id)
+    if client_record is None:
+        raise HTTPException(status_code=404, detail=f"Client '{request_id}' not found.")
+
+    # 2. Look up (or create) the case record in the DB
+    case = case_store.get_case(request_id)
+    if case is None:
+        try:
+            case = case_store.create_case_record(request_id, status="pending")
+        except sqlite3.IntegrityError:
+            # Race condition: another request created it first
+            case = case_store.get_case(request_id)
+
+    current_status = case["status"]
+
+    # 3. Check whether a run is permitted
+    allowed, reason = case_state.can_run(current_status, force=force)
+    if not allowed:
+        raise HTTPException(status_code=409, detail=reason)
+
+    # 4. If force re-run: directly reset to pending.
+    # force=True explicitly authorises bypassing the normal transition table for this
+    # reset step — that is the semantic of "force". The next step (pending→processing)
+    # is validated normally.
+    if current_status != "pending":
+        case_store.set_status(request_id, "pending")
+
+    # 5. Transition: pending → processing
+    case_state.validate_transition("pending", "processing")
+    case_store.set_status(request_id, "processing")
+
+    # 6. Launch background task — response is sent immediately after this
+    background_tasks.add_task(
+        _run_pipeline_bg,
+        request_id,
+        client_record,
+        agent_overrides,
+        synthesis_override,
+    )
+
+    return {
+        "request_id": request_id,
+        "status":     "processing",
+        "message":    (
+            "Pipeline started. Poll GET /cases/{request_id}/status for completion. "
+            "Typical runtime: 60-90 s with real LLM agents."
+        ),
+    }
+
+
+@app.get(
+    "/cases/{request_id}/status",
+    tags=["pipeline"],
+    summary="Poll pipeline and case lifecycle status",
+)
+def case_status(request_id: str) -> dict[str, Any]:
+    """
+    Return the current lifecycle status and pipeline outcome for a case.
+
+    pipeline_status, gate_outcome, seal_status, and consensus_hash are
+    populated once the pipeline completes; null while still processing.
+    """
+    if _CLIENTS.get(request_id) is None:
+        raise HTTPException(status_code=404, detail=f"Client '{request_id}' not found.")
+
+    case = case_store.get_case(request_id)
+    if case is None:
+        return {
+            "request_id":      request_id,
+            "status":          "pending",
+            "pipeline_status": None,
+            "gate_outcome":    None,
+            "seal_status":     None,
+            "consensus_hash":  None,
+            "initiated_at":    None,
+            "updated_at":      None,
+        }
+
+    return {
+        "request_id":      case["request_id"],
+        "status":          case["status"],
+        "pipeline_status": case.get("pipeline_status"),
+        "gate_outcome":    case.get("gate_outcome"),
+        "seal_status":     case.get("seal_status"),
+        "consensus_hash":  case.get("consensus_hash"),
+        "initiated_at":    case.get("initiated_at"),
+        "updated_at":      case.get("updated_at"),
+    }
+
+
+@app.get(
+    "/cases/{request_id}/package",
+    tags=["pipeline"],
+    summary="Retrieve the assembled Evidence Package",
+)
+def case_package(request_id: str) -> dict[str, Any]:
+    """
+    Return the full Decision Evidence Package for a completed case.
+
+    This is the primary output of the Brightuity compliance pipeline:
+    an 8-section auditable record including agent verdicts, KYC watchlist
+    provenance, deterministic risk metrics, ECDSA consensus seal, and the
+    Layer 2 human-readable briefing.
+
+    Returns 404 if the case doesn't exist.
+    Returns 202 if the pipeline hasn't completed yet.
+    """
+    if _CLIENTS.get(request_id) is None:
+        raise HTTPException(status_code=404, detail=f"Client '{request_id}' not found.")
+
+    pkg = case_store.get_evidence_package(request_id)
+    if pkg is None:
+        # Case exists but pipeline hasn't completed
+        case = case_store.get_case(request_id)
+        status = case["status"] if case else "pending"
+        raise HTTPException(
+            status_code=202,
+            detail=(
+                f"Evidence package not yet available. "
+                f"Current status: '{status}'. "
+                f"Poll GET /cases/{request_id}/status for completion."
+            ),
+        )
+    return pkg
