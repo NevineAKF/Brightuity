@@ -109,6 +109,21 @@ def _show_verdict(result: dict) -> None:
     print(f"     was_fallback  : {result['was_fallback']}")
     print(f"     latency_ms    : {result['latency_ms']}")
 
+    sr = result.get("screening_result")
+    if sr is not None:
+        print()
+        if sr["matched"]:
+            entry = sr["matched_entry"] or {}
+            print(f"  [SCREENING]  MATCH FOUND  (deterministic — no LLM involvement)")
+            print(f"     match_type    : {sr['match_type']}")
+            print(f"     match_score   : {sr['match_score']}")
+            print(f"     watchlist_id  : {entry.get('id', '--')}")
+            print(f"     listed_name   : {entry.get('name', '--')}")
+            print(f"     country       : {entry.get('country', '--')}")
+            print(f"     source_list   : {entry.get('source', '--')}")
+        else:
+            print(f"  [SCREENING]  NO MATCH  — not on any screened watchlist")
+
 
 # ── Test runner ────────────────────────────────────────────────────────────────
 
@@ -190,6 +205,15 @@ if __name__ == "__main__":
     print()
     print("  KEY PROOF: Viktor Petrov — PASS from Doc Auditor, HALT from KYC Guardian.")
     print("  Same case. Different agent. Different scope. Both correct.")
+    viktor_sr = r3.get("screening_result", {})
+    if viktor_sr.get("matched"):
+        entry = viktor_sr.get("matched_entry") or {}
+        print(f"  DETERMINISTIC PROOF: Viktor's halt is grounded in watchlist match —")
+        print(f"    Watchlist ID  : {entry.get('id', '--')}")
+        print(f"    Match type    : {viktor_sr.get('match_type', '--').upper()}")
+        print(f"    Match score   : {viktor_sr.get('match_score', '--')} (deterministic, no LLM)")
+        print(f"    Source list   : {entry.get('source', '--')}")
+        print(f"  The LLM interpreted this confirmed match. It did not decide the match itself.")
     print()
 
     if all_passed:

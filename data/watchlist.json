@@ -1,0 +1,178 @@
+{
+  "_meta": {
+    "description": "Brightuity synthetic sanctions and PEP watchlist — simulation only, all entries fictional",
+    "sources": [
+      "EU Consolidated Sanctions List",
+      "FATF PEP Register",
+      "UN Security Council Consolidated List",
+      "OFAC SDN List (EU mirror)",
+      "National PEP Register (CY/RU/BY/UA)"
+    ],
+    "last_updated": "2026-06-01",
+    "total_entries": 18
+  },
+  "entries": [
+    {
+      "id": "WL-001",
+      "name": "Viktor Petrov",
+      "type": "pep",
+      "country": "Cyprus",
+      "source": "FATF PEP Register",
+      "listed_since": "2023-11-14",
+      "notes": "Former director of state-owned energy enterprise; beneficiary of Cyprus investment programme; member of politically exposed network with undisclosed beneficial ownership structures"
+    },
+    {
+      "id": "WL-002",
+      "name": "Konstantin Volkov",
+      "type": "pep",
+      "country": "Russia",
+      "source": "FATF PEP Register",
+      "listed_since": "2022-04-07",
+      "notes": "Former deputy minister; assets held through offshore holding structures; subject to enhanced due diligence"
+    },
+    {
+      "id": "WL-003",
+      "name": "Nikolai Fedorov",
+      "type": "sanctions",
+      "country": "Russia",
+      "source": "EU Consolidated Sanctions List",
+      "listed_since": "2022-03-01",
+      "notes": "Designated under Council Regulation (EU) 833/2014; finance and energy sector restriction"
+    },
+    {
+      "id": "WL-004",
+      "name": "Oleg Berezovsky",
+      "type": "pep",
+      "country": "Russia",
+      "source": "FATF PEP Register",
+      "listed_since": "2021-09-22",
+      "notes": "Senior government official; connections to state-controlled financial institutions"
+    },
+    {
+      "id": "WL-005",
+      "name": "Igor Makarov",
+      "type": "sanctions",
+      "country": "Russia",
+      "source": "EU Consolidated Sanctions List",
+      "listed_since": "2022-02-28",
+      "notes": "Targeted financial sanctions; asset freeze order under EU Regulation 269/2014"
+    },
+    {
+      "id": "WL-006",
+      "name": "Viktor Zolotov",
+      "type": "sanctions",
+      "country": "Russia",
+      "source": "OFAC SDN List (EU mirror)",
+      "listed_since": "2018-04-06",
+      "notes": "Head of national security apparatus; comprehensive sanctions designation"
+    },
+    {
+      "id": "WL-007",
+      "name": "Ali Hassan Al-Rashid",
+      "type": "sanctions",
+      "country": "Syria",
+      "source": "UN Security Council Consolidated List",
+      "listed_since": "2012-05-15",
+      "notes": "Listed pursuant to UNSCR 1267; travel ban and asset freeze in force"
+    },
+    {
+      "id": "WL-008",
+      "name": "Tariq Mahmoud",
+      "type": "sanctions",
+      "country": "Iran",
+      "source": "EU Consolidated Sanctions List",
+      "listed_since": "2019-09-10",
+      "notes": "Nuclear and missile proliferation-related designation; EU Iran sanctions regime"
+    },
+    {
+      "id": "WL-009",
+      "name": "Anatoly Karpov",
+      "type": "sanctions",
+      "country": "Belarus",
+      "source": "EU Consolidated Sanctions List",
+      "listed_since": "2021-06-24",
+      "notes": "Designated under EU Belarus sanctions regime; human rights-related listing"
+    },
+    {
+      "id": "WL-010",
+      "name": "Bogdan Kovacs",
+      "type": "pep",
+      "country": "Hungary",
+      "source": "National PEP Register (CY/RU/BY/UA)",
+      "listed_since": "2020-03-18",
+      "notes": "Senior state official with beneficial ownership of publicly tendered enterprises"
+    },
+    {
+      "id": "WL-011",
+      "name": "Yuri Popov",
+      "type": "sanctions",
+      "country": "Russia",
+      "source": "EU Consolidated Sanctions List",
+      "listed_since": "2022-04-08",
+      "notes": "Asset freeze; financing Russian military-industrial complex"
+    },
+    {
+      "id": "WL-012",
+      "name": "Svetlana Morozova",
+      "type": "sanctions",
+      "country": "Russia",
+      "source": "OFAC SDN List (EU mirror)",
+      "listed_since": "2022-03-15",
+      "notes": "Close associate of designated individuals; asset freeze and travel ban"
+    },
+    {
+      "id": "WL-013",
+      "name": "Rashid Al-Husseini",
+      "type": "sanctions",
+      "country": "Iraq",
+      "source": "UN Security Council Consolidated List",
+      "listed_since": "2015-11-20",
+      "notes": "Terrorism-related designation; asset freeze under UNSCR 1267/1989"
+    },
+    {
+      "id": "WL-014",
+      "name": "Jean-Claude Dupont",
+      "type": "pep",
+      "country": "France",
+      "source": "FATF PEP Register",
+      "listed_since": "2024-01-09",
+      "notes": "Former senior government minister; subject to enhanced due diligence under AMLD5 Article 20"
+    },
+    {
+      "id": "WL-015",
+      "name": "Aleksander Nowak",
+      "type": "pep",
+      "country": "Poland",
+      "source": "FATF PEP Register",
+      "listed_since": "2023-07-03",
+      "notes": "Senior judicial official; connections to state fund allocation processes"
+    },
+    {
+      "id": "WL-016",
+      "name": "Hasan Khalil",
+      "type": "sanctions",
+      "country": "Lebanon",
+      "source": "EU Consolidated Sanctions List",
+      "listed_since": "2020-09-01",
+      "notes": "Designated under EU Lebanon sanctions; obstruction of political reform process"
+    },
+    {
+      "id": "WL-017",
+      "name": "Dmitri Surkov",
+      "type": "pep",
+      "country": "Russia",
+      "source": "FATF PEP Register",
+      "listed_since": "2022-02-25",
+      "notes": "Senior political advisor with extensive offshore asset holdings; politically exposed"
+    },
+    {
+      "id": "WL-018",
+      "name": "Valentina Chernova",
+      "type": "sanctions",
+      "country": "Belarus",
+      "source": "EU Consolidated Sanctions List",
+      "listed_since": "2021-11-15",
+      "notes": "Designated for serious human rights violations; travel ban and asset freeze in force"
+    }
+  ]
+}

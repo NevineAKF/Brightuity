@@ -21,6 +21,7 @@ from pathlib import Path
 
 from shared.call_agent_model import ModelUnavailableError, call_agent_model
 from shared.schemas import KycGuardianVerdict
+from agents.kyc_guardian.screening import screen_against_watchlist
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +47,61 @@ _KYC_FIELDS: frozenset[str] = frozenset({
 
 # ── Prompt construction ────────────────────────────────────────────────────────
 
-def _build_prompt(client_record: dict) -> str:
+def _build_screening_block(sr: dict) -> str:
+    """
+    Format the deterministic screening result as a clearly-labelled block
+    for injection into the LLM prompt. The result is presented as established
+    fact; the LLM interprets and assesses it but cannot override it.
+    """
+    sources = ", ".join(sr["sources_checked"])
+    if sr["matched"]:
+        entry = sr["matched_entry"]
+        match_type_label = "PEP (Politically Exposed Person)" if entry["type"] == "pep" else "SANCTIONS"
+        lines = [
+            "DETERMINISTIC WATCHLIST SCREENING RESULT",
+            "-" * 45,
+            f"Engine        : Brightuity KYC Deterministic Engine v1.0",
+            f"Sources       : {sources}",
+            "",
+            "STATUS        : MATCH FOUND",
+            f"Match type    : {match_type_label}",
+            f"Match score   : {sr['match_score']} (deterministic — name normalisation + nationality cross-check)",
+            f"Watchlist ID  : {entry['id']}",
+            f"Listed name   : {entry['name']}",
+            f"Country       : {entry['country']}",
+            f"Source list   : {entry['source']}",
+            f"Listed since  : {entry.get('listed_since', 'N/A')}",
+            f"Notes         : {entry.get('notes', '')}",
+            "",
+            "INSTRUCTION: The above match is a CONFIRMED DETERMINISTIC FINDING.",
+            "Treat it as an established fact — do not question or re-evaluate",
+            "whether a match exists. Your task is to assess the regulatory",
+            "implications under EU AML directives and apply the correct verdict.",
+        ]
+    else:
+        lines = [
+            "DETERMINISTIC WATCHLIST SCREENING RESULT",
+            "-" * 45,
+            f"Engine        : Brightuity KYC Deterministic Engine v1.0",
+            f"Sources       : {sources}",
+            "",
+            "STATUS        : NO MATCH FOUND",
+            "The applicant's name does not appear on any screened watchlist.",
+            "",
+            "INSTRUCTION: Do not manufacture a sanctions or PEP concern that",
+            "the screening engine did not find. Base your KYC assessment solely",
+            "on the structured data below.",
+        ]
+    return "\n".join(lines)
+
+
+def _build_prompt(client_record: dict, screening_result: dict) -> str:
     """
     Build the user-turn prompt from KYC-relevant fields only.
 
     expected_outcome, documents_status, document_issues, and risk_flags are
     never referenced here and cannot reach the model.
+    The deterministic screening_result is injected before the structured data.
     """
     r = client_record
     flags = r.get("kyc_flags", [])
@@ -72,8 +122,13 @@ def _build_prompt(client_record: dict) -> str:
     except (TypeError, ValueError):
         value_display = f"EUR {value_eur}"
 
+    screening_block = _build_screening_block(screening_result)
+
     return (
         "KYC SCREENING REQUEST\n\n"
+        f"{screening_block}\n\n"
+        "APPLICANT DATA\n"
+        "-" * 45 + "\n"
         f"Request ID          : {r.get('request_id', 'UNKNOWN')}\n"
         f"Applicant Name      : {r.get('full_name', 'UNKNOWN')}\n"
         f"Date of Birth       : {r.get('date_of_birth', 'UNKNOWN')}\n"
@@ -117,7 +172,14 @@ def screen_kyc(client_record: dict) -> dict:
     request_id = client_record.get("request_id", "UNKNOWN")
     logger.info("kyc_guardian: starting screening for %s", request_id)
 
-    prompt = _build_prompt(client_record)
+    screening_result = screen_against_watchlist(client_record)
+    logger.info(
+        "kyc_guardian: watchlist screening for %s — matched=%s type=%s score=%s",
+        request_id, screening_result["matched"],
+        screening_result["match_type"], screening_result["match_score"],
+    )
+
+    prompt = _build_prompt(client_record, screening_result)
 
     try:
         response = call_agent_model(
@@ -137,12 +199,13 @@ def screen_kyc(client_record: dict) -> dict:
             "model_used": "none",
             "was_fallback": False,
             "latency_ms": 0,
+            "screening_result": screening_result,
         }
 
     data: KycGuardianVerdict = response.data
 
     logger.info(
-        "kyc_guardian: %s → verdict=%s model=%s fallback=%s latency_ms=%d",
+        "kyc_guardian: %s -> verdict=%s model=%s fallback=%s latency_ms=%d",
         request_id, data.verdict, response.model_used,
         response.was_fallback, response.latency_ms,
     )
@@ -155,4 +218,5 @@ def screen_kyc(client_record: dict) -> dict:
         "model_used": response.model_used,
         "was_fallback": response.was_fallback,
         "latency_ms": response.latency_ms,
+        "screening_result": screening_result,
     }
