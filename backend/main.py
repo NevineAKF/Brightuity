@@ -19,13 +19,15 @@ import json
 import logging
 import sqlite3
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, field_validator
 
-from backend import case_state, case_store
+from backend import case_state, case_store, authorization_signer
 from agents.orchestrator.orchestrator import run_pipeline
 from agents.governance_audit.logic import assemble_evidence_package
 
@@ -446,3 +448,201 @@ def case_package(request_id: str) -> dict[str, Any]:
             ),
         )
     return pkg
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — human authorization (Layer 2 integrity)
+# ---------------------------------------------------------------------------
+
+class AuthorizeRequest(BaseModel):
+    """
+    Request body for POST /cases/{request_id}/authorize.
+
+    PRODUCTION NOTE: signatory_name and signatory_role MUST come from the
+    verified JWT session (auth.py / Phase 2), NOT from the request body.
+    Accepting identity from the request body is acceptable only for the
+    Phase 1 demo. Any production deployment MUST enforce authenticated identity.
+    """
+    decision:        str        # "approve" | "reject"
+    rationale:       str        # reviewer's written justification (required)
+    signatory_name:  str        # reviewer's name
+    signatory_role:  str        # reviewer's role
+    annotations:     list[str] = []  # optional inline notes
+
+    @field_validator("decision")
+    @classmethod
+    def _valid_decision(cls, v: str) -> str:
+        if v not in ("approve", "reject"):
+            raise ValueError("decision must be 'approve' or 'reject'")
+        return v
+
+    @field_validator("rationale")
+    @classmethod
+    def _non_empty_rationale(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("rationale must not be empty")
+        return v.strip()
+
+
+@app.post(
+    "/cases/{request_id}/authorize",
+    tags=["authorization"],
+    summary="Record the human decision with a cryptographically-bound authorization",
+)
+def authorize_case(request_id: str, body: AuthorizeRequest) -> dict[str, Any]:
+    """
+    Record the Head of Digital Assets' approve/reject decision.
+
+    This is Layer 2 of the two-layer integrity model:
+      • Layer 1 (ConsensusSigner): ECDSA seal over the AI analysis.
+      • Layer 2 (this endpoint): ECDSA seal over the COMPLETE package
+        (analysis + machine seal + human decision + rationale).
+
+    The authorization_signature covers every byte of the evidence package
+    with the decision fields filled in. Any post-authorization mutation of
+    any field causes GET /cases/{id}/verify to return verified=False.
+
+    State rules:
+      • awaiting_decision → authorized (approve) or rejected (reject)
+      • Any other status → 409 Conflict with a specific reason.
+
+    PRODUCTION NOTE: signatory identity MUST come from the verified JWT session,
+    not from the request body. Phase 2: enforce via auth.py middleware.
+    """
+    # 1. Verify client exists
+    if _CLIENTS.get(request_id) is None:
+        raise HTTPException(status_code=404, detail=f"Client '{request_id}' not found.")
+
+    # 2. Load case; verify it's in the correct state
+    case = case_store.get_case(request_id)
+    if case is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Case '{request_id}' has not been run yet. "
+                   f"POST /cases/{request_id}/run first.",
+        )
+
+    current_status = case["status"]
+    if current_status in ("authorized", "rejected"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Decision already recorded for '{request_id}' "
+                f"(status='{current_status}'). "
+                "A signed decision cannot be overwritten."
+            ),
+        )
+    if current_status in ("halted", "blocked_gate"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Case '{request_id}' is in status '{current_status}' and "
+                "cannot be authorized. A halted or blocked case requires a "
+                "compliance investigation before any decision can be recorded."
+            ),
+        )
+    if current_status != "awaiting_decision":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Case '{request_id}' is in status '{current_status}'. "
+                "Authorization is only permitted from 'awaiting_decision'."
+            ),
+        )
+
+    # 3. Load the stored evidence package
+    pkg = case_store.get_evidence_package(request_id)
+    if pkg is None:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Evidence package missing for '{request_id}' despite status=awaiting_decision.",
+        )
+
+    # 4. Map request decision to stored decision string
+    decision_str = "approved" if body.decision == "approve" else "rejected"
+    new_status   = "authorized" if body.decision == "approve" else "rejected"
+
+    # 5. Sign the authorization (Layer 2 ECDSA)
+    signed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    auth_block = authorization_signer.sign_authorization(
+        evidence_package=pkg,
+        decision=decision_str,
+        rationale=body.rationale,
+        signatory_name=body.signatory_name,
+        signatory_role=body.signatory_role,
+        signed_at=signed_at,
+        annotations=body.annotations,
+    )
+
+    # 6. Persist: patch the evidence package + write decision columns
+    case_store.save_human_authorization(
+        request_id=request_id,
+        decision=decision_str,
+        decision_reason=body.rationale,
+        decision_by=body.signatory_name,
+        esignature_hash=auth_block["authorization_hash"],
+        human_authorization=auth_block,
+    )
+
+    # 7. Advance case status (validated through the state machine)
+    case_state.validate_transition("awaiting_decision", new_status)
+    case_store.set_status(request_id, new_status)
+
+    return {
+        "request_id":         request_id,
+        "status":             new_status,
+        "human_authorization": auth_block,
+        "message": (
+            f"Authorization recorded. Decision: {decision_str}. "
+            "GET /cases/{request_id}/verify confirms tamper-evidence."
+        ),
+    }
+
+
+@app.get(
+    "/cases/{request_id}/verify",
+    tags=["authorization"],
+    summary="Verify the tamper-evident integrity of the complete package",
+)
+def verify_case(request_id: str) -> dict[str, Any]:
+    """
+    Re-verify the Layer 2 ECDSA signature over the complete evidence package.
+
+    Returns verified=True if and only if:
+      • The stored evidence_package has not been altered since authorization.
+      • The authorization_signature is valid for the stored public_key.
+      • Every byte of the package (analysis, machine seal, human decision)
+        is exactly as it was when the Head of Digital Assets signed it.
+
+    Returns verified=False if the package was tampered with in any way.
+    Returns has_authorization=False if the case hasn't been authorized yet.
+    """
+    if _CLIENTS.get(request_id) is None:
+        raise HTTPException(status_code=404, detail=f"Client '{request_id}' not found.")
+
+    pkg = case_store.get_evidence_package(request_id)
+    if pkg is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No evidence package for '{request_id}'. Run the pipeline first.",
+        )
+
+    if not pkg.get("human_authorization"):
+        return {
+            "request_id":       request_id,
+            "verified":         False,
+            "has_authorization": False,
+            "message": "Package has not been authorized yet.",
+        }
+
+    verified = authorization_signer.verify_authorization(pkg)
+    return {
+        "request_id":        request_id,
+        "verified":          verified,
+        "has_authorization": True,
+        "message": (
+            "Signature valid — package integrity confirmed."
+            if verified
+            else "SIGNATURE INVALID — package has been tampered with or is malformed."
+        ),
+    }

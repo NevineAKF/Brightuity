@@ -219,3 +219,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Brightuity — generated credentials (never commit)
+database/auth_private_key.pem
+database/*.db

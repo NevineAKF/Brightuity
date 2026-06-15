@@ -291,20 +291,62 @@ def get_evidence_package(request_id: str) -> dict[str, Any] | None:
     return json.loads(case["evidence_package"])
 
 
-# ── Human authorization slot (Phase 2) ───────────────────────────────────────
-# save_human_authorization(
-#     request_id: str,
-#     decision: Literal["authorize", "reject"],
-#     decision_reason: str,
-#     decision_by: str,
-#     esignature_hash: str,
-# ) -> None
-#
-# This function will:
-#   1. Validate transition: awaiting_decision → authorized | rejected
-#   2. Write completed_at, decision, decision_reason, decision_by, esignature_hash
-#   3. Patch evidence_package JSON's human_authorization section in-place
-#   4. INSERT into audit_log (Phase 2: audit_log table from schema_db1.sql)
-#
-# Implementation deferred to Phase 2 (human authorize + e-signature endpoint).
-# ─────────────────────────────────────────────────────────────────────────────
+def save_human_authorization(
+    request_id: str,
+    decision: str,
+    decision_reason: str,
+    decision_by: str,
+    esignature_hash: str,
+    human_authorization: dict[str, Any],
+) -> None:
+    """
+    Persist the signed human decision and patch the stored evidence package.
+
+    Writes scalar columns (completed_at, decision, decision_reason, decision_by,
+    esignature_hash) AND patches the evidence_package JSON blob in one atomic
+    transaction so the DB never holds a partially-updated package.
+
+    The evidence_package is patched in two places:
+      • human_authorization ← the completed signed block
+      • case_summary.final_decision ← decision ("approved" | "rejected")
+
+    Does NOT update case.status — call set_status() separately so the
+    transition is always validated by case_state.validate_transition().
+
+    # Phase 3: INSERT a row into audit_log with event_type="human.decision"
+    # and event_detail = {"decision": decision, "esignature_hash": esignature_hash}.
+    # The audit_log table is defined in database/schema_db1.sql.
+    """
+    # Load the current evidence_package, patch it, and re-serialize
+    case = get_case(request_id)
+    if case is None or case.get("evidence_package") is None:
+        raise ValueError(f"No evidence package found for '{request_id}' — run the pipeline first.")
+
+    pkg: dict[str, Any] = json.loads(case["evidence_package"])
+    pkg["human_authorization"]           = human_authorization
+    pkg["case_summary"]["final_decision"] = decision
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE cases SET
+                completed_at    = ?,
+                decision        = ?,
+                decision_reason = ?,
+                decision_by     = ?,
+                esignature_hash = ?,
+                evidence_package = ?,
+                updated_at      = ?
+            WHERE request_id = ?
+            """,
+            (
+                now, decision, decision_reason, decision_by, esignature_hash,
+                json.dumps(pkg, ensure_ascii=False),
+                now, request_id,
+            ),
+        )
+    logger.info(
+        "case_store: human authorization saved for %s (decision=%s)",
+        request_id, decision,
+    )
