@@ -15,37 +15,31 @@ Security model:
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 
-from backend import band_bridge, case_state, case_store, authorization_signer
+from backend import band_bridge, case_state, case_store, authorization_signer, pii_store
 from agents.orchestrator.orchestrator import run_pipeline
 from agents.governance_audit.logic import assemble_evidence_package
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Data layer — JSON loader
-# Replace _load_clients() body with a DB1 query in Phase 2. All callers and
-# whitelists stay identical.
+# Data layer — delegates to backend.pii_store.
+# Switch PII_DB_DSN env var to read from PostgreSQL (Zone 1 / db1_pii).
+# Unset PII_DB_DSN → JSON seed file (Phase 1 / dev / CI, unchanged behaviour).
+# All callers and whitelists below stay identical.
 # ---------------------------------------------------------------------------
 
-_DATA_FILE = Path(__file__).parent.parent / "database" / "brightuity_clients.json"
-
-
 def _load_clients() -> dict[str, dict[str, Any]]:
-    with open(_DATA_FILE, encoding="utf-8") as fh:
-        raw = json.load(fh)
-    return {c["request_id"]: c for c in raw["clients"]}
+    return pii_store.load_clients()
 
 
 _CLIENTS: dict[str, dict[str, Any]] = _load_clients()
