@@ -64,9 +64,7 @@ services:
   # Reads brightuity_clients.json baked into the image, writes JSONB to db1_pii.
   # Idempotent (UPSERT): safe to restart docker compose multiple times.
   pii_seed:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: brightuity:latest
     command: ["python", "-m", "database.seed_pii_db"]
     depends_on:
       db1_pii:
@@ -81,9 +79,7 @@ services:
   # Serves scoped fields to agents (zone_agents); reads from db1_pii (zone_pii).
   # Never leaks PII beyond each agent's AGENT_SCOPES frozenset whitelist.
   pii_gateway:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: brightuity:latest
     command: ["python", "-m", "agents.pii_gateway.service"]
     depends_on:
       db1_pii:
@@ -107,9 +103,7 @@ services:
   # ── Zone 3 ─ Consensus Signer (no internet) ───────────────────────────────
   # Machine-authority (Layer 1) ECDSA signer.  zone_coord only → no internet.
   consensus_signer:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: brightuity:latest
     command: ["python", "-m", "agents.consensus_signer.service"]
     environment:
       SIGNER_PORT: ${SIGNER_PORT:-8700}
@@ -140,9 +134,7 @@ services:
   # ── Zone 2+3 ─ Orchestrator ───────────────────────────────────────────────
   # Connects to Band (wss:// via egress_proxy) and seals verdicts via signer.
   orchestrator:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: brightuity:latest
     command: ["python", "-m", "band_agents.run_orchestrator_agent"]
     depends_on:
       consensus_signer:
@@ -172,9 +164,7 @@ services:
 
   # ── Zone 2 ─ KYC Guardian ─────────────────────────────────────────────────
   kyc_guardian:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: brightuity:latest
     command: ["python", "-m", "band_agents.run_kyc_agent"]
     depends_on:
       pii_gateway:
@@ -196,9 +186,7 @@ services:
 
   # ── Zone 2 ─ Dynamic Compliance ───────────────────────────────────────────
   dynamic_compliance:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: brightuity:latest
     command: ["python", "-m", "band_agents.run_compliance_agent"]
     depends_on:
       pii_gateway:
@@ -220,9 +208,7 @@ services:
 
   # ── Zone 2 ─ Doc Auditor ──────────────────────────────────────────────────
   doc_auditor:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: brightuity:latest
     command: ["python", "-m", "band_agents.run_docauditor_agent"]
     depends_on:
       pii_gateway:
@@ -244,9 +230,7 @@ services:
 
   # ── Zone 2 ─ Stress-Test Simulator ───────────────────────────────────────
   stress_test:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: brightuity:latest
     command: ["python", "-m", "band_agents.run_stresstest_agent"]
     depends_on:
       pii_gateway:
@@ -268,9 +252,7 @@ services:
 
   # ── Zone 2 ─ Asset Tokenizer ──────────────────────────────────────────────
   asset_tokenizer:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: brightuity:latest
     command: ["python", "-m", "band_agents.run_tokenizer_agent"]
     depends_on:
       pii_gateway:
@@ -298,6 +280,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: brightuity:latest
     command: ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
     depends_on:
       db1_pii:
