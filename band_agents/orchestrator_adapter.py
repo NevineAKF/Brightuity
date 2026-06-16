@@ -182,6 +182,25 @@ _AGENT_NAME_MAP: dict[str, str] = {
     "Asset Tokenizer":        "asset_tokenizer",
 }
 
+# Case state classification — used by the duplicate-trigger guard.
+# Every valid state string must appear in exactly one of these sets.
+_ACTIVE_STATES: frozenset[str]   = frozenset({"awaiting_stage1", "awaiting_tokenizer"})
+_TERMINAL_STATES: frozenset[str] = frozenset({"complete", "timeout"})
+
+# Internal state key → human-readable stage label for user-facing messages.
+# Raw state strings ("awaiting_stage1") must never appear in the chat room.
+_STAGE_LABELS: dict[str, str] = {
+    "awaiting_stage1":    "screening (stage 1)",
+    "awaiting_tokenizer": "tokenization (stage 2)",
+    "complete":           "complete",
+    "timeout":            "timed out",
+}
+
+
+def _stage_label(state: str) -> str:
+    """Return a human-readable stage label for an internal case state string."""
+    return _STAGE_LABELS.get(state, state)
+
 
 def _parse_verdict(content: str) -> str | None:
     """
@@ -289,12 +308,55 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
 
         if case_key in self._cases:
             state = self._cases[case_key]["state"]
-            await tools.send_message(
-                f"`{request_id}` is already in progress (state: **{state}**). "
-                "Waiting for remaining agent replies.",
-                mentions=[sender],
-            )
-            return
+
+            if state in _ACTIVE_STATES:
+                # Pipeline is in-flight — reject the duplicate trigger cleanly.
+                stage = _stage_label(state)
+                logger.info(
+                    "orchestrator: duplicate trigger for active case %s "
+                    "(state=%s) — rejecting",
+                    request_id, state,
+                )
+                await tools.send_message(
+                    f"`{request_id}` is already being processed "
+                    f"(**{stage}**). A new run will not be started until the "
+                    "current one finishes.",
+                    mentions=[sender],
+                )
+                return
+
+            elif state in _TERMINAL_STATES:
+                # Deliberate re-run of a finished case (e.g. new audit pass,
+                # re-submission after a timeout).  Cancel any lingering chase
+                # task, wipe the old state, and fall through to a fresh
+                # initialisation below — the existing init block is reused.
+                old_chase = self._cases[case_key].get("chase_task")
+                if old_chase and not old_chase.done():
+                    old_chase.cancel()
+                    logger.debug(
+                        "orchestrator: cancelled lingering chase task for %s (re-run)",
+                        request_id,
+                    )
+                logger.info(
+                    "orchestrator: RE-RUN %s (previous run: %s) — starting fresh case",
+                    request_id, state,
+                )
+                del self._cases[case_key]
+                # Falls through to the init block immediately below.
+
+            else:
+                # Unrecognised state: refuse rather than risk a parallel run.
+                logger.warning(
+                    "orchestrator: unrecognised case state %r for %s — "
+                    "treating as active and rejecting trigger",
+                    state, request_id,
+                )
+                await tools.send_message(
+                    f"`{request_id}` has an unrecognised pipeline state. "
+                    "Please contact support.",
+                    mentions=[sender],
+                )
+                return
 
         # Initialise case state.
         self._cases[case_key] = {
