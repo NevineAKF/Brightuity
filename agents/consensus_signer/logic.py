@@ -317,13 +317,15 @@ class ConsensusSigner:
 
         # ── ECDSA signature ────────────────────────────────────────────────────
         # We pass canonical_bytes (not the pre-computed digest) to sign().
-        # The library re-hashes with SHA-256 internally using constant-time
-        # primitives and generates the nonce via RFC 6979 (deterministic k),
-        # which eliminates the risk of nonce reuse that would expose the
-        # private key. The returned bytes are DER-encoded (ASN.1 SEQUENCE).
+        # deterministic_signing=True activates RFC 6979 (deterministic k):
+        # the library derives the nonce from the key and message deterministically
+        # rather than from a PRNG, eliminating nonce-reuse risk.  Two calls with
+        # the same key and the same canonical_bytes always produce byte-identical
+        # signatures — a required property for the HTTP service transport layer.
+        # The returned bytes are DER-encoded (ASN.1 SEQUENCE).
         signature_der: bytes = self._private_key.sign(
             canonical_bytes,
-            ec.ECDSA(hashes.SHA256()),
+            ec.ECDSA(hashes.SHA256(), deterministic_signing=True),
         )
 
         return SealedProof(

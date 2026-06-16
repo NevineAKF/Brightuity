@@ -6,18 +6,25 @@ Single source of truth for the three functions both execution paths must call
 identically:
 
     evaluate_governance_gate  — deterministic Layer-1 gate enforcement
-    seal_decision             — ECDSA seal via the module-level ConsensusSigner
+    seal_decision             — ECDSA seal: in-process or HTTP signer service
     build_decision_record     — canonical (decision_record, event_log) builder
-
-Pure module: only imports ConsensusSigner. No HTTP, no Band, no FastAPI,
-no logging of business data.
 
 Both callers (in-process orchestrator and Band adapter) import from here.
 Structural drift between the two paths is now impossible — there is one
 implementation, not two.
+
+seal_decision transport switch (SIGNER_URL env var):
+    unset / empty → in-process ConsensusSigner (default; all tests and local dev)
+    set           → POST to the consensus signer HTTP service at that URL
+                    Intended for isolated, no-egress container deployments.
+                    Uses synchronous httpx so it works inside asyncio.to_thread.
 """
 
 from __future__ import annotations
+
+import os
+
+import httpx
 
 from agents.consensus_signer.logic import ConsensusSigner
 
@@ -115,11 +122,17 @@ def evaluate_governance_gate(
 
 def seal_decision(case_record: dict, agent_verdicts: dict) -> dict:
     """
-    Run the ECDSA seal step via the module-level ConsensusSigner.
+    Run the ECDSA seal step.
 
-    Wraps _signer.seal() so neither caller holds its own ConsensusSigner
-    instance. Both execution paths call this function; the seal result is
-    therefore structurally identical regardless of caller.
+    Transport switch (SIGNER_URL env var, read at call time):
+      unset / empty → in-process ConsensusSigner (_signer below).
+                       Default: all local dev, tests, and existing CI pass
+                       through here unchanged.
+      set           → HTTP POST to the consensus signer service at SIGNER_URL.
+                       Used in production when the signer runs as an isolated
+                       no-egress container.  The call is synchronous (httpx)
+                       so it is safe to invoke from asyncio.to_thread (the
+                       Band adapter already wraps this function that way).
 
     Args:
         case_record:    Non-PII case metadata (request_id, client_id,
@@ -130,6 +143,21 @@ def seal_decision(case_record: dict, agent_verdicts: dict) -> dict:
         SealedProof dict  (status="sealed")   — all 5 gates cleared.
         BlockedResult dict (status="blocked") — one or more gates failed.
     """
+    signer_url = os.getenv("SIGNER_URL", "").strip()
+    if signer_url:
+        try:
+            resp = httpx.post(
+                f"{signer_url}/seal",
+                json={"case_record": case_record, "agent_verdicts": agent_verdicts},
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Consensus signer service at {signer_url!r} "
+                f"returned an error: {type(exc).__name__}: {exc}"
+            ) from exc
     return _signer.seal(case_record, agent_verdicts)
 
 
