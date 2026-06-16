@@ -213,7 +213,8 @@ def _extract_chat_id(resp: httpx.Response) -> str:
     if not isinstance(data, dict):
         return ""
     return str(
-        data.get("chat_id")
+        (data.get("data") or {}).get("id")
+        or data.get("chat_id")
         or data.get("id")
         or (data.get("chat") or {}).get("chat_id")
         or (data.get("chat") or {}).get("id")
