@@ -122,6 +122,7 @@ def run_case_via_band(request_id: str) -> tuple[dict, list[dict]]:
 
     with _api_client() as client:
         chat_id = _create_or_reuse_room(client, request_id)
+        logger.info("band_bridge: REQ %s created/polling chat_id=%s", request_id, chat_id)
         _add_participants(client, chat_id)
         _post_trigger(client, chat_id, request_id)
         return _await_result(client, chat_id, request_id)
@@ -339,7 +340,32 @@ def _await_result(
         try:
             resp = client.get(url)
             if resp.is_success:
-                result = _find_terminal_result(resp.json(), request_id)
+                context_data = resp.json()
+                # ── Diagnostic: log what GET /context returned this cycle ────
+                _diag_items: list[Any] = []
+                if isinstance(context_data, list):
+                    _diag_items = context_data
+                elif isinstance(context_data, dict):
+                    for _k in ("messages", "events", "history", "items", "data"):
+                        _v = context_data.get(_k)
+                        if isinstance(_v, list):
+                            _diag_items.extend(_v)
+                logger.info(
+                    "band_bridge: REQ %s poll: %d context items",
+                    request_id, len(_diag_items),
+                )
+                for _it in _diag_items:
+                    if not isinstance(_it, dict):
+                        continue
+                    _c = _it.get("content") or _it.get("text") or ""
+                    logger.info(
+                        "band_bridge:   item type=%s sender=%s content=%r",
+                        _it.get("message_type"),
+                        _it.get("sender_id") or _it.get("sender_name"),
+                        _c[:60],
+                    )
+                # ─────────────────────────────────────────────────────────────
+                result = _find_terminal_result(context_data, request_id)
                 if result is not None:
                     decision_record, event_log = result
                     logger.info(
@@ -412,6 +438,12 @@ def _find_terminal_result(
         if not isinstance(metadata, dict):
             metadata = {}
 
+        if "brightuity_terminal" in content:
+            logger.info(
+                "band_bridge: saw terminal-ish item: content=%r meta_keys=%s",
+                content[:80],
+                list(metadata.keys()),
+            )
         content_match = isinstance(content, str) and content.startswith(marker)
         meta_match    = (
             metadata.get("terminal_result") is True
