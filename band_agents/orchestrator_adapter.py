@@ -961,3 +961,33 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             "(pipeline_status=%s)",
             request_id, decision_record.get("pipeline_status"),
         )
+
+        # GET /context is agent-scoped: the backend's poll only sees messages
+        # the backend agent sent OR text messages that @mention the backend.
+        # The send_event above is invisible to the backend's context view.
+        # Re-deliver the payload as a send_message @mentioning the backend
+        # so it surfaces in the backend's GET /context response.
+        if _BACKEND_AGENT_ID:
+            terminal_payload = json.dumps(
+                {
+                    "request_id":      request_id,
+                    "terminal_result": True,
+                    "decision_record": decision_record,
+                    "event_log":       event_log,
+                },
+                default=str,
+            )
+            await tools.send_message(
+                f"brightuity_terminal:{request_id} {terminal_payload}",
+                mentions=[_BACKEND_AGENT_ID],
+            )
+            logger.info(
+                "orchestrator: terminal result message sent to backend agent for %s",
+                request_id,
+            )
+        else:
+            logger.warning(
+                "orchestrator: BAND_BACKEND_AGENT_ID not set — backend cannot "
+                "poll for terminal result of %s via send_message",
+                request_id,
+            )

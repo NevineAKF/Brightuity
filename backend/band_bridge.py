@@ -35,6 +35,7 @@ Config (with defaults):
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -422,6 +423,20 @@ def _find_terminal_result(
 
         decision_record = metadata.get("decision_record")
         event_log       = metadata.get("event_log")
+
+        # Fallback: the orchestrator delivers the terminal result as a
+        # send_message @mentioning the backend (text messages appear in the
+        # backend's GET /context view; send_event does not).  Text messages
+        # carry no metadata, so parse the JSON payload from the content:
+        #   "brightuity_terminal:{id} {json_payload}"
+        if not isinstance(decision_record, dict) and content_match:
+            try:
+                prefix = f"{marker} "
+                parsed = json.loads(content[len(prefix):])
+                decision_record = parsed.get("decision_record")
+                event_log       = parsed.get("event_log", [])
+            except (ValueError, KeyError):
+                pass
 
         if not isinstance(decision_record, dict):
             logger.warning(
