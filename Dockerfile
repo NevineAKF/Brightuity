@@ -55,6 +55,11 @@ print('Model baked successfully.')"
 # Copied last: code changes invalidate only this layer, not deps or the model.
 COPY . .
 
+# Build the ChromaDB regulatory RAG index from the committed corpus.
+# Offline: embedding model (all-MiniLM-L6-v2) already in HF_HOME from the layer above.
+# Output: /app/rag_corpus/chroma_index/  (sub-10s, ~841KB; gitignored so must be built here)
+RUN python rag_corpus/build_index.py
+
 # ── No single-service CMD ─────────────────────────────────────────────────────
 # docker-compose sets the command per container (see docker-compose.yml).
 # Running the bare image without a compose override prints a usage hint.
