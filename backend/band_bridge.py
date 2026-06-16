@@ -9,7 +9,7 @@ the room's context endpoint for the terminal tool_result event written by the
 orchestrator adapter.  No filesystem IPC — results travel over Band only.
 
 Band Agent API (base: {THENVOI_REST_URL}/api/v1/agent):
-  POST /chats                         Create room  (task_id = request_id)
+  POST /chats                         Create room  (body: {"chat": {}})
   POST /chats/{chat_id}/participants  Add agent participant
   POST /chats/{chat_id}/messages      Post trigger message
   GET  /chats/{chat_id}/context       Poll for terminal result event
@@ -152,8 +152,8 @@ def _create_or_reuse_room(client: httpx.Client, request_id: str) -> str:
     """
     POST /agent/chats  →  create a Band chat room linked to this case.
 
-    Idempotency: if Band returns 409 Conflict (room with this task_id already
-    exists — e.g. a pipeline re-run), we parse the existing chat_id from the
+    Idempotency: if Band returns 409 Conflict (room already exists —
+    e.g. a pipeline re-run), we parse the existing chat_id from the
     response body and reuse the room rather than raising.  Any other non-2xx
     status propagates so the caller sees a clean error.
 
@@ -161,7 +161,7 @@ def _create_or_reuse_room(client: httpx.Client, request_id: str) -> str:
         chat_id — the room identifier for all subsequent API calls.
     """
     url  = f"{_AGENT_BASE}/chats"
-    resp = client.post(url, json={"task_id": request_id})
+    resp = client.post(url, json={"chat": {}})
 
     if resp.status_code == 409:
         chat_id = _extract_chat_id(resp)
