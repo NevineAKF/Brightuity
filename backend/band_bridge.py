@@ -238,7 +238,7 @@ def _add_participants(client: httpx.Client, chat_id: str) -> None:
 
     for agent_id in _PARTICIPANT_IDS:
         try:
-            resp = client.post(url, json={"agent_id": agent_id})
+            resp = client.post(url, json={"participant": {"participant_id": agent_id}})
             if resp.status_code == 409:
                 logger.debug(
                     "band_bridge: agent %s already in chat %s", agent_id, chat_id,
