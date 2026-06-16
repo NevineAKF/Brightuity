@@ -126,6 +126,36 @@ _REQ_ID_RE = re.compile(r"\b(REQ-\d+)\b", re.IGNORECASE)
 # All adapters use **{verdict.upper()}** — "PASS", "FAIL", or "HALT".
 _VERDICT_RE = re.compile(r"\*\*(PASS|FAIL|HALT)\*\*", re.IGNORECASE)
 
+# Band double-bracket mention token: @[[<uuid-or-display-id>]]
+# These are injected by the platform into the message content when an agent
+# reply is addressed to another agent.  They MUST be stripped before any agent
+# summary reaches human-readable output (HALT reasons, evidence packages, etc.).
+_MENTION_TOKEN_RE = re.compile(r"@\[\[[^\]]+\]\]")
+
+# Bare @handle at the VERY START of the string — a fallback mention format used
+# after UUID tokens have already been removed.  Anchored to ^ so it never
+# touches legitimate '@' characters inside prose (e.g. "email a@b.com").
+_LEADING_HANDLE_RE = re.compile(r"^@\S+\s+")
+
+
+def _strip_mentions(text: str) -> str:
+    """
+    Remove Band mention tokens from agent reply content before storing summaries.
+
+    Strips in two passes:
+      1. All @[[<id>]] double-bracket tokens (anywhere in the string).
+      2. Any bare @Handle token remaining at the very start after pass 1
+         (only if followed by whitespace — never strips mid-sentence '@').
+
+    Collapses the leading whitespace exposed after removal, then strips ends.
+    Does NOT touch '@' inside prose — "email a@b.com" is returned unchanged.
+    """
+    text = _MENTION_TOKEN_RE.sub("", text)   # remove all @[[...]] tokens
+    text = text.lstrip()                      # expose any leading @handle
+    text = _LEADING_HANDLE_RE.sub("", text)  # remove leading bare @handle if present
+    return text.strip()
+
+
 # Stage-1 gate keys — must all report before gate is evaluated.
 _STAGE1_GATES: tuple[str, ...] = (
     "doc_auditor",
@@ -539,7 +569,7 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 return
 
             case["verdicts"][agent_name]  = verdict
-            case["summaries"][agent_name] = content[:300]
+            case["summaries"][agent_name] = _strip_mentions(content)[:300]
             collected = sum(1 for v in case["verdicts"].values() if v is not None)
             logger.info(
                 "orchestrator: collected %s=%s for %s (%d/%d)",
@@ -570,7 +600,7 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 )
                 return
             case["verdicts"]["asset_tokenizer"]  = token_verdict
-            case["summaries"]["asset_tokenizer"] = content[:300]
+            case["summaries"]["asset_tokenizer"] = _strip_mentions(content)[:300]
             case["state"] = "complete"
             logger.info(
                 "orchestrator: %s tokenizer=%s → running ConsensusSigner.seal()",
