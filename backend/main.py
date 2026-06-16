@@ -27,7 +27,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 
-from backend import case_state, case_store, authorization_signer
+from backend import band_bridge, case_state, case_store, authorization_signer
 from agents.orchestrator.orchestrator import run_pipeline
 from agents.governance_audit.logic import assemble_evidence_package
 
@@ -163,23 +163,26 @@ def _run_pipeline_bg(
     """
     Execute the full pipeline in a background thread.
 
-    Called by BackgroundTasks after the POST /cases/{id}/run response is sent.
-    Writes the result to the case store and advances the case status.
+    Routes to the live Band orchestrator when configured; falls back to the
+    in-process run_pipeline() for tests and headless operation.
 
-    # ── Phase 2 Band live-streaming hook ───────────────────────────────────
-    # After each agent completes, the orchestrator emits events into event_log.
-    # Phase 2: iterate event_log here and forward each event to the Band room
-    # for this request_id via band_bridge.post_event(request_id, event).
-    # That delivers real-time @mentions to the Head of Digital Assets as each
-    # gate clears or fails — before the pipeline finishes.
-    # ───────────────────────────────────────────────────────────────────────
+    Routing discriminator:
+      agent_overrides is non-empty  → in-process (test injection seam).
+      band_bridge.is_configured()   → Band path (production with all env vars set).
+      otherwise                     → in-process (dev / CI without Band creds).
+
+    Both paths return (decision_record, event_log) with the same shape and feed
+    the unchanged assemble_evidence_package → case_store flow.
     """
     try:
-        decision_record, event_log = run_pipeline(
-            client_record,
-            _agent_overrides=agent_overrides or {},
-            _synthesis_override=synthesis_override,
-        )
+        if band_bridge.is_configured() and not agent_overrides:
+            decision_record, event_log = band_bridge.run_case_via_band(request_id)
+        else:
+            decision_record, event_log = run_pipeline(
+                client_record,
+                _agent_overrides=agent_overrides or {},
+                _synthesis_override=synthesis_override,
+            )
         evidence_package = assemble_evidence_package(
             decision_record, event_log, client_record
         )

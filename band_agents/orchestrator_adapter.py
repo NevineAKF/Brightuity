@@ -72,8 +72,7 @@ from agents.orchestrator.synthesis import synthesize_briefing
 
 logger = logging.getLogger(__name__)
 
-_CLIENTS_JSON     = Path(__file__).parent.parent / "database" / "brightuity_clients.json"
-_BAND_RESULTS_DIR = Path(__file__).parent.parent / "database" / "band_results"
+_CLIENTS_JSON = Path(__file__).parent.parent / "database" / "brightuity_clients.json"
 
 # ── Retry constants ─────────────────────────────────────────────────────────────
 RETRY_INTERVAL: int = 25   # seconds between re-mention checks
@@ -403,7 +402,7 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 "reminders_sent":   MAX_RETRIES,
             },
         )
-        await self._write_band_result(case, request_id)
+        await self._write_band_result(case, request_id, tools)
 
     # ── Verdict collection ─────────────────────────────────────────────────────
 
@@ -580,7 +579,7 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 )
 
             # Persist canonical result for band_bridge to consume.
-            await self._write_band_result(case, request_id)
+            await self._write_band_result(case, request_id, tools)
 
     # ── Gate evaluation ────────────────────────────────────────────────────────
 
@@ -650,7 +649,7 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 },
             )
             logger.info("orchestrator: %s → %s", request_id, status)
-            await self._write_band_result(case, request_id)
+            await self._write_band_result(case, request_id, tools)
             return
 
         # ── Gates clear → delegate to Asset Tokenizer ─────────────────────────
@@ -666,21 +665,36 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
 
     # ── Result persistence (IPC to band_bridge) ────────────────────────────────
 
-    async def _write_band_result(self, case: dict, request_id: str) -> None:
+    async def _write_band_result(
+        self,
+        case:       dict,
+        request_id: str,
+        tools:      AgentToolsProtocol,
+    ) -> None:
         """
-        Build the canonical (decision_record, event_log) and write it to
-        database/band_results/{request_id}.json for band_bridge to consume.
+        Build the canonical (decision_record, event_log), run Layer 2 synthesis,
+        then post a terminal tool_result event to the Band chat room so that
+        band_bridge can retrieve the result via GET /agent/chats/{id}/context.
 
         Called at every terminal case state: sealed, blocked, halted, timeout.
         The Band path produces a reduced agent_results dict (verdict + summary
-        only) — the evidence package is structurally valid but less granular
-        than the in-process path which carries model_used, latency_ms, etc.
+        only) — structurally valid but less granular than the in-process path
+        (which carries model_used, latency_ms, etc.).
 
-        Layer 2 synthesis (synthesize_briefing) runs off the event loop via
-        asyncio.to_thread so the blocking LLM call does not stall the adapter.
-        synthesize_briefing never raises (triple fallback: Opus → Sonnet →
-        templated), but is guarded defensively so a surprise exception still
-        produces a complete record and never aborts the file write.
+        Layer 2 synthesis runs off the event loop via asyncio.to_thread;
+        synthesize_briefing never raises (triple fallback), but is guarded
+        defensively so a surprise exception still produces a complete record
+        and the terminal event is always posted.
+
+        The terminal event carries:
+            content      = "brightuity_terminal:{request_id}"
+            message_type = "tool_result"
+            metadata     = {
+                "request_id":      request_id,
+                "terminal_result": True,
+                "decision_record": {...},
+                "event_log":       [...],
+            }
         """
         v     = case["verdicts"]
         summs = case["summaries"]
@@ -730,15 +744,21 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             }
         decision_record["briefing"] = briefing
 
-        case["result"] = {"decision_record": decision_record, "event_log": event_log}
-
-        _BAND_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-        result_path = _BAND_RESULTS_DIR / f"{request_id}.json"
-        result_path.write_text(
-            json.dumps(
-                {"decision_record": decision_record, "event_log": event_log},
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
+        # Post the terminal result as a structured tool_result event.
+        # band_bridge locates this event via GET /agent/chats/{chat_id}/context
+        # by matching the "brightuity_terminal:{request_id}" content prefix.
+        await tools.send_event(
+            content      = f"brightuity_terminal:{request_id}",
+            message_type = "tool_result",
+            metadata     = {
+                "request_id":      request_id,
+                "terminal_result": True,
+                "decision_record": decision_record,
+                "event_log":       event_log,
+            },
         )
-        logger.info("orchestrator: band result written for %s → %s", request_id, result_path)
+        logger.info(
+            "orchestrator: terminal result event posted for %s "
+            "(pipeline_status=%s)",
+            request_id, decision_record.get("pipeline_status"),
+        )
