@@ -223,3 +223,15 @@ __marimo__/
 # Brightuity — generated credentials (never commit)
 database/auth_private_key.pem
 database/*.db
+
+# Brightuity — hardened secret patterns
+# .env.* catches .env.local / .env.staging / .env.production / etc.
+# !.env.example MUST follow .env.* so the safe template stays tracked.
+.env.*
+!.env.example
+# Any PEM certificate or private key file anywhere in the repo.
+*.pem
+*.key
+auth_private_key.pem
+# Any SQLite/database file at any path (database/*.db already above, belt-and-suspenders).
+*.db
