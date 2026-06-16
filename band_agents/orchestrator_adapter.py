@@ -68,6 +68,7 @@ from band.core.protocols import AgentToolsProtocol
 from band.core.types import PlatformMessage
 
 from agents.orchestrator.core import evaluate_governance_gate, seal_decision, build_decision_record
+from agents.orchestrator.synthesis import synthesize_briefing
 
 logger = logging.getLogger(__name__)
 
@@ -402,7 +403,7 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 "reminders_sent":   MAX_RETRIES,
             },
         )
-        self._write_band_result(case, request_id)
+        await self._write_band_result(case, request_id)
 
     # ── Verdict collection ─────────────────────────────────────────────────────
 
@@ -579,7 +580,7 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 )
 
             # Persist canonical result for band_bridge to consume.
-            self._write_band_result(case, request_id)
+            await self._write_band_result(case, request_id)
 
     # ── Gate evaluation ────────────────────────────────────────────────────────
 
@@ -592,12 +593,13 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
         initiator: str,
     ) -> None:
         """All 4 stage-1 verdicts in — evaluate the governance gate."""
-        v = case["verdicts"]
+        v     = case["verdicts"]
+        summs = case["summaries"]
 
-        doc_r    = {"verdict": v["doc_auditor"]}
-        kyc_r    = {"verdict": v["kyc_guardian"], "summary": ""}
-        comp_r   = {"verdict": v["dynamic_compliance"]}
-        stress_r = {"verdict": v["stress_test"]}
+        doc_r    = {"verdict": v["doc_auditor"],        "summary": summs.get("doc_auditor", "")}
+        kyc_r    = {"verdict": v["kyc_guardian"],        "summary": summs.get("kyc_guardian", "")}
+        comp_r   = {"verdict": v["dynamic_compliance"],  "summary": summs.get("dynamic_compliance", "")}
+        stress_r = {"verdict": v["stress_test"],         "summary": summs.get("stress_test", "")}
 
         gate_outcome, gate_reason = evaluate_governance_gate(
             doc_r, kyc_r, comp_r, stress_r
@@ -648,7 +650,7 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 },
             )
             logger.info("orchestrator: %s → %s", request_id, status)
-            self._write_band_result(case, request_id)
+            await self._write_band_result(case, request_id)
             return
 
         # ── Gates clear → delegate to Asset Tokenizer ─────────────────────────
@@ -664,7 +666,7 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
 
     # ── Result persistence (IPC to band_bridge) ────────────────────────────────
 
-    def _write_band_result(self, case: dict, request_id: str) -> None:
+    async def _write_band_result(self, case: dict, request_id: str) -> None:
         """
         Build the canonical (decision_record, event_log) and write it to
         database/band_results/{request_id}.json for band_bridge to consume.
@@ -673,6 +675,12 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
         The Band path produces a reduced agent_results dict (verdict + summary
         only) — the evidence package is structurally valid but less granular
         than the in-process path which carries model_used, latency_ms, etc.
+
+        Layer 2 synthesis (synthesize_briefing) runs off the event loop via
+        asyncio.to_thread so the blocking LLM call does not stall the adapter.
+        synthesize_briefing never raises (triple fallback: Opus → Sonnet →
+        templated), but is guarded defensively so a surprise exception still
+        produces a complete record and never aborts the file write.
         """
         v     = case["verdicts"]
         summs = case["summaries"]
@@ -700,6 +708,27 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             briefing       = {},
             timings        = {"stage1_wall_ms": 0, "total_wall_ms": 0},
         )
+
+        # ── Layer 2: LLM synthesis (additive, zero decision authority) ────────
+        # synthesize_briefing is a blocking call; run it off the event loop.
+        try:
+            briefing = await asyncio.to_thread(synthesize_briefing, decision_record)
+        except Exception as exc:
+            logger.error(
+                "orchestrator: synthesis raised unexpectedly for %s (Band path): %s",
+                request_id, exc, exc_info=True,
+            )
+            briefing = {
+                "headline":          f"[Briefing unavailable — synthesis error: {type(exc).__name__}]",
+                "decisive_factor":   case.get("gate_reason") or "",
+                "per_agent_summary": [],
+                "recommendation":    "Review the full decision record manually.",
+                "source":            "error_fallback",
+                "model_used":        "none",
+                "was_fallback":      False,
+                "latency_ms":        0,
+            }
+        decision_record["briefing"] = briefing
 
         case["result"] = {"decision_record": decision_record, "event_log": event_log}
 
