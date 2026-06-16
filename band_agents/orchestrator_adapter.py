@@ -7,10 +7,13 @@ COORDINATION PATTERN (real Band, no in-process calls):
      → Orchestrator posts FOUR separate messages — one per stage-1 agent, each
        @mentioning exactly one agent by UUID. Individual mentions are far more
        reliable than a 4-way fan-out.
-     → A background chase task (_chase_verdicts) re-mentions any agent that has
-       not replied within RETRY_INTERVAL seconds, up to MAX_RETRIES times.
-     → If verdicts are still missing after all retries, the pipeline times out
-       and escalates for manual review — it NEVER hangs indefinitely.
+     → A background _chase_verdicts task monitors progress with a heartbeat
+       model (see HEARTBEAT MODEL below): agents that have posted ANY reply
+       (acked) are considered "in progress" and are NEVER re-mentioned; only
+       genuinely silent agents (zero response) are nudged, and only up to
+       SILENT_MAX_RETRIES times. SAFETY_CEILING is the final backstop.
+     → If verdicts are still absent when SAFETY_CEILING fires, the pipeline
+       times out and escalates for manual review — it NEVER hangs indefinitely.
   2. Each specialist's send_message reply arrives in on_message as a MessageEvent
      (msg.sender_type="Agent", msg.sender_id=<specialist UUID>).
      → Orchestrator parses the verdict from msg.content (always contains **PASS**,
@@ -22,9 +25,24 @@ COORDINATION PATTERN (real Band, no in-process calls):
      on the structured verdicts already held in case state (no chat-text re-parsing),
      then posts the ECDSA seal result labeled as the Consensus Signer step.
 
-RETRY CONSTANTS:
-  RETRY_INTERVAL = 25 s   — sleep between re-mention checks
-  MAX_RETRIES    = 3      — re-mention attempts (~25 s, ~50 s, ~75 s before timeout)
+HEARTBEAT MODEL (replaces blind re-mention):
+  Agents doing heavy regulatory work (Dynamic Compliance: Gemini 2.5 Pro + RAG,
+  ~22 s measured) MUST NOT be re-mentioned while actively working — each
+  re-mention spawns a fresh run and can corrupt the room state.
+
+  The chase task separates two cases:
+    SILENT  = agent never acked (zero messages) → re-mention to recover a
+              dropped initial @mention; small, bounded attempt count.
+    WORKING = agent acked (any message without a verdict yet) → wait patiently;
+              NEVER re-mention.
+
+  Timing constants (see module-level constants below):
+    SILENT_RETRY_INTERVAL = 30 s  — cadence for checking / re-mentioning silents.
+    SILENT_MAX_RETRIES    = 3     — max re-mention rounds per silent agent
+                                    (3 × 30 = 90 s of nudging).
+    SAFETY_CEILING        = 180 s — absolute deadline from initial trigger.
+                                    Exists ONLY to survive a genuine agent crash.
+                                    Healthy pipelines (~60–90 s) have >2× headroom.
 
 STATE: self._cases[(room_id, request_id)] — persists across on_message() calls.
        asyncio is single-threaded; dict reads/writes are atomic between awaits.
@@ -60,6 +78,7 @@ import json
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -74,9 +93,23 @@ logger = logging.getLogger(__name__)
 
 _CLIENTS_JSON = Path(__file__).parent.parent / "database" / "brightuity_clients.json"
 
-# ── Retry constants ─────────────────────────────────────────────────────────────
-RETRY_INTERVAL: int = 25   # seconds between re-mention checks
-MAX_RETRIES:    int = 3    # re-mention attempts before hard timeout (~75 s total)
+# ── Heartbeat timing constants ──────────────────────────────────────────────────
+# See module docstring "HEARTBEAT MODEL" for the full rationale.
+
+# How long to wait between checking whether a silent (never-acked) agent needs
+# a nudge.  Must be comfortably longer than normal agent startup time so that
+# an agent still loading its model is not considered "silent" prematurely.
+SILENT_RETRY_INTERVAL: int = 30   # seconds
+
+# How many re-mention rounds to send to a silent agent before giving up and
+# waiting for the safety ceiling.  3 × 30 s = 90 s of nudges total.
+SILENT_MAX_RETRIES: int = 3
+
+# Absolute deadline from initial mentions to _handle_timeout.  Must be generous
+# enough that any normally-working acked agent completes well within it.  At
+# 180 s the slowest observed agent (~22 s) has >8× headroom.  The ceiling exists
+# ONLY to prevent a forever-hung pipeline on a genuine crash.
+SAFETY_CEILING: int = 180   # seconds from initial mentions to forced timeout
 
 
 def _load_client_index() -> dict[str, dict[str, Any]]:
@@ -179,7 +212,10 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
         #                                         # | complete | timeout
         #   "verdicts":    {gate_key: str|None},  # None until received
         #   "summaries":   {gate_key: str},       # first 300 chars of each reply (for seal)
-        #   "chase_task":  asyncio.Task|None,     # background retry task — cancelled on
+        #   "acked":       set[str],              # gates that posted any message (even a
+        #                                         # status/"Running…" without a verdict);
+        #                                         # _chase_verdicts skips re-mentioning these
+        #   "chase_task":  asyncio.Task|None,     # background heartbeat task — cancelled on
         #                                         # completion or when all verdicts arrive
         # }
         self._cases: dict[tuple[str, str], dict[str, Any]] = {}
@@ -236,6 +272,7 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             "state":           "awaiting_stage1",
             "verdicts":        {k: None for k in _STAGE1_GATES},
             "summaries":       {},
+            "acked":           set(),
             "chase_task":      None,
             "gate_outcome":    None,
             "gate_reason":     None,
@@ -279,22 +316,29 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
         request_id: str,
     ) -> None:
         """
-        Background task: actively pursue any stage-1 agent that has not replied.
+        Background heartbeat task: monitor stage-1 agents and re-mention only the
+        silent (never-acked) ones.
 
-        Sleeps RETRY_INTERVAL seconds, then re-mentions every agent whose verdict
-        is still missing. Repeats up to MAX_RETRIES times (~25 s, ~50 s, ~75 s).
-        After all retries, calls _handle_timeout() if verdicts are still absent.
+        Two agent categories:
+          SILENT  — no message at all since the initial @mention. Re-mention up to
+                    SILENT_MAX_RETRIES times at SILENT_RETRY_INTERVAL cadence to
+                    recover a dropped delivery.
+          WORKING — already acked (sent any message, even a status update without a
+                    verdict). NEVER re-mention: the agent is actively running, and a
+                    duplicate @mention spawns a second run that corrupts room state.
 
-        The task is cancelled (via Task.cancel()) by _collect_verdict as soon as
-        all 4 verdicts arrive — no orphaned tasks.
-
-        asyncio.CancelledError during sleep is caught and causes a clean return.
+        The outer bound is SAFETY_CEILING seconds from task start.  It exists only
+        to prevent a forever-hung pipeline if an agent crashes completely after
+        acking.  In a healthy system the ceiling NEVER fires — the task is cancelled
+        by _collect_verdict as soon as all 4 verdicts arrive.
         """
-        case_key = (room_id, request_id)
+        case_key     = (room_id, request_id)
+        t_start      = time.monotonic()
+        silent_round = 0   # number of re-mention rounds sent to silent agents
 
-        for attempt in range(1, MAX_RETRIES + 1):
+        while True:
             try:
-                await asyncio.sleep(RETRY_INTERVAL)
+                await asyncio.sleep(SILENT_RETRY_INTERVAL)
             except asyncio.CancelledError:
                 logger.info(
                     "orchestrator: chase task for %s cancelled — all verdicts arrived",
@@ -302,7 +346,7 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 )
                 return
 
-            # Re-read live case state each iteration.
+            # Re-read live case state.
             case = self._cases.get(case_key)
             if case is None or case["state"] != "awaiting_stage1":
                 logger.debug(
@@ -313,40 +357,73 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
 
             missing = [g for g in _STAGE1_GATES if case["verdicts"].get(g) is None]
             if not missing:
-                logger.info("orchestrator: %s all verdicts collected — chase task done", request_id)
+                logger.info(
+                    "orchestrator: %s all verdicts collected — chase task done", request_id,
+                )
                 return
 
-            logger.info(
-                "orchestrator: %s still missing: %s (attempt %d/%d) — re-mentioning",
-                request_id, missing, attempt, MAX_RETRIES,
-            )
-            for gate in missing:
-                agent_id = self._gate_id_map.get(gate, "")
-                if agent_id:
-                    await tools.send_message(
-                        f"@{_GATE_DISPLAY[gate]} — reminder: please report your verdict for `{request_id}`.",
-                        mentions=[agent_id],
-                    )
-                    logger.info(
-                        "orchestrator: re-mentioning %s attempt %d/%d",
-                        gate, attempt, MAX_RETRIES,
-                    )
-                    try:
-                        await asyncio.sleep(0.3)
-                    except asyncio.CancelledError:
-                        logger.info(
-                            "orchestrator: chase for %s cancelled mid-retry", request_id,
+            elapsed = time.monotonic() - t_start
+
+            # ── Safety ceiling — fires only on a genuine agent crash ───────────
+            if elapsed >= SAFETY_CEILING:
+                logger.warning(
+                    "orchestrator: SAFETY CEILING reached for %s after %.0fs — "
+                    "timing out %s",
+                    request_id, elapsed, missing,
+                )
+                await self._handle_timeout(tools, case, case_key, request_id, missing)
+                return
+
+            # ── Classify missing agents by ack status ─────────────────────────
+            acked   = case.get("acked", set())
+            silent  = [g for g in missing if g not in acked]
+            working = [g for g in missing if g in acked]
+
+            for gate in working:
+                logger.info(
+                    "orchestrator: %s agent %s acked — awaiting verdict (not re-mentioning)",
+                    request_id, gate,
+                )
+
+            # ── Re-mention only silent agents (up to SILENT_MAX_RETRIES) ──────
+            if silent and silent_round < SILENT_MAX_RETRIES:
+                silent_round += 1
+                logger.info(
+                    "orchestrator: %s silent agents %s — re-mention round %d/%d "
+                    "(elapsed %.0fs)",
+                    request_id, silent, silent_round, SILENT_MAX_RETRIES, elapsed,
+                )
+                for gate in silent:
+                    agent_id = self._gate_id_map.get(gate, "")
+                    if agent_id:
+                        await tools.send_message(
+                            f"@{_GATE_DISPLAY[gate]} — reminder: please report "
+                            f"your verdict for `{request_id}`.",
+                            mentions=[agent_id],
                         )
-                        return
+                        logger.info(
+                            "orchestrator: re-mentioning silent agent %s "
+                            "round %d/%d for %s",
+                            gate, silent_round, SILENT_MAX_RETRIES, request_id,
+                        )
+                        try:
+                            await asyncio.sleep(0.3)
+                        except asyncio.CancelledError:
+                            logger.info(
+                                "orchestrator: chase for %s cancelled mid-retry",
+                                request_id,
+                            )
+                            return
 
-        # All MAX_RETRIES re-mention loops completed — final check.
-        case = self._cases.get(case_key)
-        if case is None or case["state"] != "awaiting_stage1":
-            return
-
-        missing = [g for g in _STAGE1_GATES if case["verdicts"].get(g) is None]
-        if missing:
-            await self._handle_timeout(tools, case, case_key, request_id, missing)
+            elif silent:
+                # Silent agents exhausted all re-mention rounds.  Stop nagging;
+                # the safety ceiling will catch any genuine crash.
+                remaining = SAFETY_CEILING - elapsed
+                logger.info(
+                    "orchestrator: %s silent agents %s exhausted re-mentions "
+                    "(%d/%d) — waiting up to %.0fs for safety ceiling",
+                    request_id, silent, silent_round, SILENT_MAX_RETRIES, remaining,
+                )
 
     # ── Timeout fallback ───────────────────────────────────────────────────────
 
@@ -379,13 +456,13 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
         missing_display = ", ".join(_GATE_DISPLAY.get(g, g) for g in missing)
 
         logger.warning(
-            "orchestrator: TIMEOUT %s — missing verdicts from %s after %d reminders",
-            request_id, missing, MAX_RETRIES,
+            "orchestrator: TIMEOUT %s — missing verdicts from %s (safety ceiling expired)",
+            request_id, missing,
         )
         await tools.send_message(
             f"⚠️ **Pipeline TIMEOUT** — `{request_id}`\n\n"
             f"Did not receive verdict(s) from: **{missing_display}** "
-            f"after {MAX_RETRIES} reminders ({MAX_RETRIES * RETRY_INTERVAL} s).\n\n"
+            f"within the {SAFETY_CEILING} s safety ceiling.\n\n"
             "Escalating to **Head of Digital Assets** for manual review.\n"
             "No automated seal.",
             mentions=[initiator],
@@ -399,7 +476,7 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 "status":           "timeout_incomplete",
                 "missing_agents":   missing,
                 "arrived_verdicts": arrived,
-                "reminders_sent":   MAX_RETRIES,
+                "reminders_sent":   SILENT_MAX_RETRIES,
             },
         )
         await self._write_band_result(case, request_id, tools)
@@ -443,16 +520,21 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
         if state == "awaiting_stage1" and agent_name in _STAGE1_GATES:
             if case["verdicts"].get(agent_name) is not None:
                 logger.debug(
-                    "orchestrator: duplicate verdict from %s for %s — ignoring",
+                    "orchestrator: ignoring duplicate verdict for %s (%s)",
                     agent_name, request_id,
                 )
                 return
 
             verdict = _parse_verdict(content)
             if verdict is None:
-                logger.warning(
-                    "orchestrator: no parseable verdict from %s for %s: %r",
-                    agent_name, request_id, content[:200],
+                # Agent posted a status / acknowledgement without a verdict yet.
+                # Record the ack so _chase_verdicts knows this agent is actively
+                # working and must NOT be re-mentioned.
+                case["acked"].add(agent_name)
+                logger.info(
+                    "orchestrator: agent %s acked for %s — awaiting verdict "
+                    "(not re-mentioning)",
+                    agent_name, request_id,
                 )
                 return
 
