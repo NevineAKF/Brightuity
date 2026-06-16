@@ -445,7 +445,11 @@ def _find_terminal_result(
                 content[:80],
                 list(metadata.keys()),
             )
-        content_match = isinstance(content, str) and content.startswith(marker)
+        # Band prepends mention tokens to message content, e.g.:
+        #   "@[[uuid]] brightuity_terminal:REQ-2041 {...}"
+        # Use find() so the marker is located regardless of any leading prefix.
+        idx           = content.find(marker) if isinstance(content, str) else -1
+        content_match = idx != -1
         meta_match    = (
             metadata.get("terminal_result") is True
             and metadata.get("request_id") == request_id
@@ -460,12 +464,14 @@ def _find_terminal_result(
         # Fallback: the orchestrator delivers the terminal result as a
         # send_message @mentioning the backend (text messages appear in the
         # backend's GET /context view; send_event does not).  Text messages
-        # carry no metadata, so parse the JSON payload from the content:
-        #   "brightuity_terminal:{id} {json_payload}"
+        # carry no metadata, so parse the JSON payload from the content.
+        # Slice from idx (the marker position) to skip any leading @[[uuid]] prefix.
+        #   tail format: "brightuity_terminal:{id} {json_payload}"
         if not isinstance(decision_record, dict) and content_match:
             try:
-                prefix = f"{marker} "
-                parsed = json.loads(content[len(prefix):])
+                tail        = content[idx:]                # from marker onward
+                payload_str = tail[len(marker):].lstrip()  # strip marker + whitespace
+                parsed = json.loads(payload_str)
                 decision_record = parsed.get("decision_record")
                 event_log       = parsed.get("event_log", [])
             except (ValueError, KeyError):
