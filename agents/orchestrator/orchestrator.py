@@ -38,7 +38,7 @@ Execution graph (DAG):
                     └──────────────────────┘
 
 Dual-layer gate system (deliberate design):
-  Layer 1 — Orchestrator (_evaluate_governance_gate):
+  Layer 1 — Orchestrator (evaluate_governance_gate from core):
     Mandatory hard-blockers: Doc Auditor, KYC Guardian, Dynamic Compliance.
     KYC "halt" triggers immediate hard stop (no tokenizer).
     Other failures block tokenizer (gate="blocked").
@@ -86,16 +86,15 @@ from agents.kyc_guardian.logic import screen_kyc
 from agents.dynamic_compliance.logic import assess_compliance
 from agents.stress_test.logic import run_stress_test
 from agents.asset_tokenizer.logic import design_token_structure
-from agents.consensus_signer.logic import ConsensusSigner
 from agents.orchestrator.synthesis import synthesize_briefing
+from agents.orchestrator.core import (
+    evaluate_governance_gate,
+    seal_decision,
+    build_decision_record,
+)
 from shared.config import AGENT_HTTP_URLS
 
 logger = logging.getLogger(__name__)
-
-# ── Module-level signer instance ───────────────────────────────────────────────
-# One instance per process — the public key is stable within a session.
-# In production: inject a persistent HSM-backed key (never ephemeral in-memory).
-_signer = ConsensusSigner()
 
 
 # ── HTTP transport helpers (used when AGENT_TRANSPORT=http) ────────────────────
@@ -208,81 +207,6 @@ def _safe_call(agent_name: str, fn: Callable[[dict], dict], client_record: dict)
             "type=%s error=%s", agent_name, type(exc).__name__, exc, exc_info=True,
         )
         return _safe_default(agent_name, f"{type(exc).__name__}: {exc}")
-
-
-# ── Governance gate (deterministic, the critical section) ───────────────────────
-
-def _evaluate_governance_gate(
-    doc_result:        dict,
-    kyc_result:        dict,
-    compliance_result: dict,
-    stress_result:     dict,
-) -> tuple[str, str]:
-    """
-    Enforce the hard governance gates deterministically.
-
-    This function is the single point of gate logic. It is pure, side-effect-free,
-    and testable in isolation. Any change to gate semantics happens here and nowhere
-    else.
-
-    KYC Guardian has absolute veto: a "halt" verdict stops the pipeline
-    immediately, regardless of other verdicts. This is the hardest gate because
-    KYC/AML obligations are binary legal requirements — there is no "partially
-    compliant" path.
-
-    Mandatory gates (ALL must be "pass" to proceed to tokenization):
-      - Doc Auditor
-      - KYC Guardian
-      - Dynamic Compliance
-
-    Advisory gate (NOT a hard-block at orchestrator level):
-      - Stress-Test Simulator: a non-passing result is surfaced to the human but
-        does not prevent the tokenizer from running. The human sees the full picture
-        (token structure + risk assessment) and makes the final call.
-        NOTE: the Consensus Signer still requires stress_test="pass" to produce a
-        seal. So a stress_test fail ultimately results in "blocked_gate" status —
-        but with a token structure visible, unlike the doc/kyc/compliance fail path.
-
-    Returns:
-        (gate_outcome, deciding_reason)
-        gate_outcome: "halt" | "blocked" | "pass"
-    """
-    # ── Hard veto: KYC halt ────────────────────────────────────────────────────
-    if kyc_result.get("verdict") == "halt":
-        return "halt", (
-            "KYC Guardian issued HALT verdict — immediate hard stop. "
-            f"No tokenization. No seal. "
-            f"Summary: {kyc_result.get('summary', '(no summary)')[:200]}"
-        )
-
-    # ── Collect mandatory gate failures ───────────────────────────────────────
-    failures: list[str] = []
-    if doc_result.get("verdict") != "pass":
-        failures.append(
-            f"doc_auditor={doc_result.get('verdict')!r}"
-        )
-    if kyc_result.get("verdict") != "pass":
-        failures.append(
-            f"kyc_guardian={kyc_result.get('verdict')!r}"
-        )
-    if compliance_result.get("verdict") != "pass":
-        failures.append(
-            f"dynamic_compliance={compliance_result.get('verdict')!r}"
-        )
-    # stress_test is intentionally excluded here — see module docstring for rationale.
-
-    if failures:
-        return "blocked", "Mandatory gate failures: " + "; ".join(failures)
-
-    # Mention stress_test status in the pass reason so it's visible in the event log.
-    stress_verdict = stress_result.get("verdict", "unknown")
-    stress_note = (
-        f"Stress-test={stress_verdict!r} (advisory — "
-        "ConsensusSigner will enforce this gate at seal time)"
-        if stress_verdict != "pass"
-        else "Stress-test=pass"
-    )
-    return "pass", f"All mandatory gates cleared (Doc✓ KYC✓ Compliance✓). {stress_note}."
 
 
 # ── Stage 1: parallel agent execution ─────────────────────────────────────────
@@ -431,7 +355,7 @@ def run_pipeline(
             "dynamic_compliance": _make_http_agent("dynamic_compliance"),
             "stress_test":        _make_http_agent("stress_test"),
             "asset_tokenizer":    _make_http_agent("asset_tokenizer"),
-            "consensus_signer":   _signer.seal,
+            "consensus_signer":   seal_decision,
         }
     else:
         real_agents: dict[str, Callable] = {
@@ -440,7 +364,7 @@ def run_pipeline(
             "dynamic_compliance": assess_compliance,
             "stress_test":        run_stress_test,
             "asset_tokenizer":    design_token_structure,
-            "consensus_signer":   _signer.seal,
+            "consensus_signer":   seal_decision,
         }
     agents: dict[str, Callable] = {**real_agents, **(_agent_overrides or {})}
 
@@ -457,7 +381,7 @@ def run_pipeline(
         stress_result     = stage1_results["stress_test"]
 
         # ── GOVERNANCE GATE ───────────────────────────────────────────────────
-        gate_outcome, gate_reason = _evaluate_governance_gate(
+        gate_outcome, gate_reason = evaluate_governance_gate(
             doc_result, kyc_result, compliance_result, stress_result
         )
         _emit("gate_result", outcome=gate_outcome, reason=gate_reason)
@@ -549,31 +473,33 @@ def run_pipeline(
             request_id, pipeline_status, total_wall_ms,
         )
 
-        decision_record: dict = {
+        _agent_results: dict[str, dict | None] = {
+            "doc_auditor":        doc_result,
+            "kyc_guardian":       kyc_result,
+            "dynamic_compliance": compliance_result,
+            "stress_test":        stress_result,
+            "asset_tokenizer":    token_result,
+        }
+
+        # ── LAYER 2: LLM synthesis — additive, zero decision authority ─────────
+        # Layer 1 (gates + seal) is COMPLETE and COMMITTED above this line.
+        # synthesize_briefing receives the complete Layer-1 record (same fields
+        # as the final decision_record, minus briefing) so it can describe the
+        # decision — it never influences it.
+        _synthesize = _synthesis_override if _synthesis_override is not None else synthesize_briefing
+        _pre_brief: dict = {
             "request_id":      request_id,
             "pipeline_status": pipeline_status,
             "gate_outcome":    gate_outcome,
             "gate_reason":     gate_reason,
-            "agents": {
-                "doc_auditor":        doc_result,
-                "kyc_guardian":       kyc_result,
-                "dynamic_compliance": compliance_result,
-                "stress_test":        stress_result,
-                "asset_tokenizer":    token_result,
-            },
+            "agents":          _agent_results,
             "token_structure": token_result,
             "seal":            seal_result,
             "stage1_wall_ms":  stage1_wall_ms,
             "total_wall_ms":   total_wall_ms,
         }
-        # ── LAYER 2: LLM synthesis — additive, zero decision authority ─────────
-        # Layer 1 (gates + seal) is COMPLETE and COMMITTED above this line.
-        # Nothing below changes pipeline_status, gate_outcome, or seal.
-        # synthesize_briefing() never raises — it returns a templated fallback
-        # on any LLM failure. The outer try/except here is a last-resort guard.
-        _synthesize = _synthesis_override if _synthesis_override is not None else synthesize_briefing
         try:
-            briefing = _synthesize(decision_record)
+            briefing = _synthesize(_pre_brief)
         except Exception as exc:
             logger.error(
                 "orchestrator: synthesis raised unexpectedly for %s: %s",
@@ -589,11 +515,25 @@ def run_pipeline(
                 "was_fallback":      False,
                 "latency_ms":        0,
             }
-        decision_record["briefing"] = briefing
         _emit(
             "briefing_complete",
             source=briefing.get("source"),
             model_used=briefing.get("model_used"),
+        )
+
+        # Build canonical record via the shared builder so both execution paths
+        # (in-process and Band-coord) produce the same shape. The fine-grained
+        # _emit() event log is used for the returned tuple; the synthetic log
+        # from build_decision_record is for the Band path only.
+        decision_record, _synth_log = build_decision_record(
+            request_id=request_id,
+            pipeline_status=pipeline_status,
+            gate_outcome=gate_outcome,
+            gate_reason=gate_reason,
+            agent_results=_agent_results,
+            seal=seal_result,
+            briefing=briefing,
+            timings={"stage1_wall_ms": stage1_wall_ms, "total_wall_ms": total_wall_ms},
         )
 
         return decision_record, events

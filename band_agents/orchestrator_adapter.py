@@ -15,7 +15,7 @@ COORDINATION PATTERN (real Band, no in-process calls):
      (msg.sender_type="Agent", msg.sender_id=<specialist UUID>).
      → Orchestrator parses the verdict from msg.content (always contains **PASS**,
        **FAIL**, or **HALT** in bold) and stores it in per-room+request state.
-  3. When all 4 stage-1 verdicts are collected → _evaluate_governance_gate:
+  3. When all 4 stage-1 verdicts are collected → evaluate_governance_gate (core.py):
      - halt/blocked → post stop message + send_event, case complete.
      - pass → @mention Asset Tokenizer with the same REQ-id.
   4. Tokenizer reply arrives → Orchestrator runs ConsensusSigner.seal() in-process
@@ -30,8 +30,7 @@ STATE: self._cases[(room_id, request_id)] — persists across on_message() calls
        asyncio is single-threaded; dict reads/writes are atomic between awaits.
        "chase_task" field: asyncio.Task handle; cancelled when all verdicts arrive.
 
-GATE LOGIC: _evaluate_governance_gate() — identical to
-            agents/orchestrator/orchestrator.py:_evaluate_governance_gate.
+GATE LOGIC: evaluate_governance_gate() from agents/orchestrator/core.py.
             KYC "halt" = absolute veto. Doc/KYC(non-halt)/Compliance non-pass =
             blocked. Stress-test is advisory at orchestrator level.
 
@@ -68,11 +67,12 @@ from band.core.simple_adapter import SimpleAdapter
 from band.core.protocols import AgentToolsProtocol
 from band.core.types import PlatformMessage
 
-from agents.consensus_signer.logic import ConsensusSigner
+from agents.orchestrator.core import evaluate_governance_gate, seal_decision, build_decision_record
 
 logger = logging.getLogger(__name__)
 
-_CLIENTS_JSON = Path(__file__).parent.parent / "database" / "brightuity_clients.json"
+_CLIENTS_JSON     = Path(__file__).parent.parent / "database" / "brightuity_clients.json"
+_BAND_RESULTS_DIR = Path(__file__).parent.parent / "database" / "band_results"
 
 # ── Retry constants ─────────────────────────────────────────────────────────────
 RETRY_INTERVAL: int = 25   # seconds between re-mention checks
@@ -131,49 +131,6 @@ def _parse_verdict(content: str) -> str | None:
     return m.group(1).lower() if m else None
 
 
-def _evaluate_governance_gate(
-    doc_result: dict,
-    kyc_result: dict,
-    compliance_result: dict,
-    stress_result: dict,
-) -> tuple[str, str]:
-    """
-    Deterministic governance gate — identical logic to
-    agents/orchestrator/orchestrator.py:_evaluate_governance_gate.
-
-    KYC "halt" = absolute veto (no tokenizer, no seal).
-    Doc / KYC (non-halt) / Compliance non-pass = "blocked" (no tokenizer).
-    Stress-test is advisory; ConsensusSigner enforces it at seal time.
-
-    Returns (gate_outcome, deciding_reason).
-    gate_outcome: "halt" | "blocked" | "pass"
-    """
-    if kyc_result.get("verdict") == "halt":
-        return "halt", (
-            "KYC Guardian issued HALT verdict — immediate hard stop. "
-            f"Summary: {kyc_result.get('summary', '')[:200]}"
-        )
-
-    failures: list[str] = []
-    if doc_result.get("verdict") != "pass":
-        failures.append(f"doc_auditor={doc_result.get('verdict')!r}")
-    if kyc_result.get("verdict") != "pass":
-        failures.append(f"kyc_guardian={kyc_result.get('verdict')!r}")
-    if compliance_result.get("verdict") != "pass":
-        failures.append(f"dynamic_compliance={compliance_result.get('verdict')!r}")
-
-    if failures:
-        return "blocked", "Mandatory gate failures: " + "; ".join(failures)
-
-    stress_verdict = stress_result.get("verdict", "unknown")
-    stress_note = (
-        f"Stress-test={stress_verdict!r} (advisory — ConsensusSigner enforces at seal)"
-        if stress_verdict != "pass"
-        else "Stress-test=pass"
-    )
-    return "pass", f"All mandatory gates cleared (Doc✓ KYC✓ Compliance✓). {stress_note}."
-
-
 class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
     """
     Band coordination adapter for the Orchestrator agent.
@@ -214,9 +171,6 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             "dynamic_compliance": self._comp_id,
             "stress_test":        self._stress_id,
         }
-
-        # One ConsensusSigner per process — stable ephemeral keypair for the session.
-        self._signer = ConsensusSigner()
 
         # Per-(room_id, request_id) pipeline state.
         # {
@@ -278,11 +232,15 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
 
         # Initialise case state.
         self._cases[case_key] = {
-            "initiator":  sender,
-            "state":      "awaiting_stage1",
-            "verdicts":   {k: None for k in _STAGE1_GATES},
-            "summaries":  {},
-            "chase_task": None,
+            "initiator":       sender,
+            "state":           "awaiting_stage1",
+            "verdicts":        {k: None for k in _STAGE1_GATES},
+            "summaries":       {},
+            "chase_task":      None,
+            "gate_outcome":    None,
+            "gate_reason":     None,
+            "pipeline_status": None,
+            "seal_result":     None,
         }
         logger.info("orchestrator: NEW CASE %s room=%s", request_id, room_id)
 
@@ -406,7 +364,12 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
         Posts an escalation message, emits timeout_incomplete event.
         Does NOT proceed to tokenizer. Does NOT seal.
         """
-        case["state"] = "timeout"
+        case["state"]           = "timeout"
+        case["pipeline_status"] = "error"
+        case["seal_result"]     = {
+            "status": "blocked",
+            "reason": "Pipeline timeout — verdicts not received within retry window.",
+        }
         initiator       = case["initiator"]
         arrived         = {
             g: case["verdicts"][g]
@@ -439,6 +402,7 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 "reminders_sent":   MAX_RETRIES,
             },
         )
+        self._write_band_result(case, request_id)
 
     # ── Verdict collection ─────────────────────────────────────────────────────
 
@@ -552,7 +516,11 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 "asset_tokenizer":    {"verdict": token_verdict,           "summary": summs.get("asset_tokenizer", "")},
             }
 
-            seal = await asyncio.to_thread(self._signer.seal, case_record, agent_verdicts)
+            seal = await asyncio.to_thread(seal_decision, case_record, agent_verdicts)
+            case["seal_result"]     = seal
+            case["pipeline_status"] = (
+                "approved_pending_human" if seal["status"] == "sealed" else "blocked_gate"
+            )
 
             if seal["status"] == "sealed":
                 sig_preview = seal["signature"][:16] + "…"
@@ -610,6 +578,9 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                     request_id, seal["failed_gate"],
                 )
 
+            # Persist canonical result for band_bridge to consume.
+            self._write_band_result(case, request_id)
+
     # ── Gate evaluation ────────────────────────────────────────────────────────
 
     async def _apply_gate(
@@ -628,9 +599,11 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
         comp_r   = {"verdict": v["dynamic_compliance"]}
         stress_r = {"verdict": v["stress_test"]}
 
-        gate_outcome, gate_reason = _evaluate_governance_gate(
+        gate_outcome, gate_reason = evaluate_governance_gate(
             doc_r, kyc_r, comp_r, stress_r
         )
+        case["gate_outcome"] = gate_outcome
+        case["gate_reason"]  = gate_reason
 
         def fv(key: str) -> str:
             return (v.get(key) or "?").upper()
@@ -649,7 +622,13 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
         if gate_outcome in ("halt", "blocked"):
             status = "halted_kyc" if gate_outcome == "halt" else "blocked_gate"
             icon   = "🚨" if gate_outcome == "halt" else "🔴"
-            case["state"] = "complete"
+            case["state"]           = "complete"
+            case["pipeline_status"] = status
+            case["seal_result"]     = {
+                "status":     "blocked",
+                "failed_gate": "kyc_guardian" if gate_outcome == "halt" else "governance_gate",
+                "reason":     gate_reason,
+            }
             await tools.send_message(
                 f"{icon} **Pipeline {gate_outcome.upper()}** — `{request_id}`\n"
                 f"No tokenization. No seal.\n"
@@ -669,6 +648,7 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 },
             )
             logger.info("orchestrator: %s → %s", request_id, status)
+            self._write_band_result(case, request_id)
             return
 
         # ── Gates clear → delegate to Asset Tokenizer ─────────────────────────
@@ -681,3 +661,55 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             mentions=token_mentions or [initiator],
         )
         logger.info("orchestrator: %s → delegating to Asset Tokenizer", request_id)
+
+    # ── Result persistence (IPC to band_bridge) ────────────────────────────────
+
+    def _write_band_result(self, case: dict, request_id: str) -> None:
+        """
+        Build the canonical (decision_record, event_log) and write it to
+        database/band_results/{request_id}.json for band_bridge to consume.
+
+        Called at every terminal case state: sealed, blocked, halted, timeout.
+        The Band path produces a reduced agent_results dict (verdict + summary
+        only) — the evidence package is structurally valid but less granular
+        than the in-process path which carries model_used, latency_ms, etc.
+        """
+        v     = case["verdicts"]
+        summs = case["summaries"]
+
+        agent_results: dict[str, dict | None] = {}
+        for gate in _STAGE1_GATES:
+            if v.get(gate) is not None:
+                agent_results[gate] = {
+                    "verdict": v[gate],
+                    "summary": summs.get(gate, ""),
+                }
+        if v.get("asset_tokenizer") is not None:
+            agent_results["asset_tokenizer"] = {
+                "verdict": v["asset_tokenizer"],
+                "summary": summs.get("asset_tokenizer", ""),
+            }
+
+        decision_record, event_log = build_decision_record(
+            request_id     = request_id,
+            pipeline_status= case.get("pipeline_status") or "error",
+            gate_outcome   = case.get("gate_outcome")    or "unknown",
+            gate_reason    = case.get("gate_reason")     or "",
+            agent_results  = agent_results,
+            seal           = case.get("seal_result")     or {},
+            briefing       = {},
+            timings        = {"stage1_wall_ms": 0, "total_wall_ms": 0},
+        )
+
+        case["result"] = {"decision_record": decision_record, "event_log": event_log}
+
+        _BAND_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        result_path = _BAND_RESULTS_DIR / f"{request_id}.json"
+        result_path.write_text(
+            json.dumps(
+                {"decision_record": decision_record, "event_log": event_log},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        logger.info("orchestrator: band result written for %s → %s", request_id, result_path)
