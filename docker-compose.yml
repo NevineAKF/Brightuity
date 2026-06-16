@@ -146,6 +146,7 @@ services:
     environment:
       BAND_ORCHESTRATOR_AGENT_ID: ${BAND_ORCHESTRATOR_AGENT_ID}
       BAND_ORCHESTRATOR_API_KEY:  ${BAND_ORCHESTRATOR_API_KEY}
+      BAND_BACKEND_AGENT_ID:      ${BAND_BACKEND_AGENT_ID}
       THENVOI_WS_URL:   ${THENVOI_WS_URL:-wss://app.band.ai/api/v1/socket/websocket}
       THENVOI_REST_URL: ${THENVOI_REST_URL:-https://app.band.ai}
       SCOPE_SERVICE_URL: ${SCOPE_SERVICE_URL:-http://pii_gateway:8701}
