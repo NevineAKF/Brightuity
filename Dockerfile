@@ -51,6 +51,14 @@ print('Baking embedding model all-MiniLM-L6-v2 ...'); \
 SentenceTransformer('all-MiniLM-L6-v2'); \
 print('Model baked successfully.')"
 
+# ── HuggingFace offline mode ──────────────────────────────────────────────────
+# Set AFTER the bake RUN so that step can still reach huggingface.co to download
+# the model. All subsequent RUN steps and every runtime container inherit these
+# flags — build_index.py and every agent load the cached model without any
+# attempt to contact huggingface.co (which the egress proxy correctly blocks).
+ENV HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
+
 # ── Application source ────────────────────────────────────────────────────────
 # Copied last: code changes invalidate only this layer, not deps or the model.
 COPY . .
