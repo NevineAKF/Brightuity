@@ -1,3 +1,366 @@
-# Purpose: Docker Compose — one container per agent + backend + two PostgreSQL instances.
-# Enforces Zone 1 isolation: DB1 container has no external network; agent containers in Zone 1 network only.
-# Populate in Phase 2 once Band SDK and all agent dependencies are confirmed.
+# Brightuity — Production Docker Compose
+# ─────────────────────────────────────────────────────────────────────────────
+# Zone isolation is enforced by Docker networks with internal:true.
+# Containers on an internal network have NO route to the internet.
+#
+# ZONE MAP
+#   zone_pii    (internal) — db1_pii, pii_seed, pii_gateway, backend
+#   zone_agents (internal) — 6 Band agents, pii_gateway, egress_proxy
+#   zone_coord  (internal) — consensus_signer, orchestrator
+#   edge        (default)  — egress_proxy (controlled outbound), backend (public :8000)
+#
+# SECURITY CLAIMS (line refs in parentheses)
+#   ✓ db1_pii has NO internet path         → zone_pii only + internal:true  [see networks section]
+#   ✓ Band agents cannot bypass egress     → zone_agents only + internal:true [idem]
+#   ✓ consensus_signer has NO internet     → zone_coord only + internal:true  [idem]
+#   ✓ Egress allow-list enforced in Squid  → infra/egress_proxy/squid.conf
+#
+# WEBSOCKET NOTE (Band SDK, wss://app.band.ai)
+#   Squid handles wss:// via HTTP CONNECT tunneling.  Agents set
+#   HTTPS_PROXY=http://egress_proxy:3128 so that Python's urllib3/httpx
+#   route all TCP connections through Squid.  websockets v16 supports an
+#   explicit `proxy` kwarg; if the Band SDK's phoenix-channels layer does
+#   not pass it, the connection is REFUSED (no direct internet on
+#   zone_agents internal:true) — a safe hard-fail, not a silent bypass.
+#   To validate this in production, search the SDK for websockets.connect()
+#   and confirm HTTPS_PROXY is forwarded.
+#
+# BACKEND PII WIRING DECISION
+#   The backend reads full PII via PII_DB_DSN → db1_pii on zone_pii.
+#   It does NOT call pii_gateway (which serves agent-scoped fields only).
+#   Joining zone_pii gives backend DB access without granting db1_pii any
+#   internet path (internal:true applies to the network, not to services
+#   that join it — db1_pii is never on edge).
+#
+# USAGE
+#   cp .env.example .env && $EDITOR .env   # fill real values
+#   docker compose build
+#   docker compose up
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Zone 1 ─ PII Database ──────────────────────────────────────────────────
+  # Air-gapped: zone_pii only, internal:true → no internet path whatsoever.
+  db1_pii:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB}
+    volumes:
+      - pii_db_data:/var/lib/postgresql/data
+    networks:
+      - zone_pii
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # No ports exposed — unreachable from host or internet
+
+  # ── Zone 1 ─ PII Seeder (one-shot) ────────────────────────────────────────
+  # Reads brightuity_clients.json baked into the image, writes JSONB to db1_pii.
+  # Idempotent (UPSERT): safe to restart docker compose multiple times.
+  pii_seed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "database.seed_pii_db"]
+    depends_on:
+      db1_pii:
+        condition: service_healthy
+    environment:
+      PII_DB_DSN: ${PII_DB_DSN}
+    networks:
+      - zone_pii
+    restart: "no"
+
+  # ── Zone 1+2 bridge ─ PII Gateway ─────────────────────────────────────────
+  # Serves scoped fields to agents (zone_agents); reads from db1_pii (zone_pii).
+  # Never leaks PII beyond each agent's AGENT_SCOPES frozenset whitelist.
+  pii_gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "agents.pii_gateway.service"]
+    depends_on:
+      db1_pii:
+        condition: service_healthy
+      pii_seed:
+        condition: service_completed_successfully
+    environment:
+      PII_DB_DSN:  ${PII_DB_DSN}
+      PII_GW_PORT: ${PII_GW_PORT:-8701}
+    networks:
+      - zone_pii
+      - zone_agents
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8701/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Zone 3 ─ Consensus Signer (no internet) ───────────────────────────────
+  # Machine-authority (Layer 1) ECDSA signer.  zone_coord only → no internet.
+  consensus_signer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "agents.consensus_signer.service"]
+    environment:
+      SIGNER_PORT: ${SIGNER_PORT:-8700}
+      JWT_SECRET:  ${JWT_SECRET}
+    networks:
+      - zone_coord
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8700/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Egress Proxy (Squid) ──────────────────────────────────────────────────
+  # Bridge between zone_agents (internal) and edge (internet).
+  # Allow-list: api.aimlapi.com, api.featherless.ai, app.band.ai — see squid.conf.
+  # Handles CONNECT tunneling for HTTPS + wss:// WebSocket connections.
+  egress_proxy:
+    build:
+      context: infra/egress_proxy
+      dockerfile: Dockerfile
+    networks:
+      - zone_agents
+      - edge
+    restart: unless-stopped
+
+  # ── Zone 2+3 ─ Orchestrator ───────────────────────────────────────────────
+  # Connects to Band (wss:// via egress_proxy) and seals verdicts via signer.
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "band_agents.run_orchestrator_agent"]
+    depends_on:
+      consensus_signer:
+        condition: service_healthy
+      pii_gateway:
+        condition: service_healthy
+      egress_proxy:
+        condition: service_started
+    environment:
+      BAND_ORCHESTRATOR_AGENT_ID: ${BAND_ORCHESTRATOR_AGENT_ID}
+      BAND_ORCHESTRATOR_API_KEY:  ${BAND_ORCHESTRATOR_API_KEY}
+      THENVOI_WS_URL:   ${THENVOI_WS_URL:-wss://app.band.ai/api/v1/socket/websocket}
+      THENVOI_REST_URL: ${THENVOI_REST_URL:-https://app.band.ai}
+      SCOPE_SERVICE_URL: ${SCOPE_SERVICE_URL:-http://pii_gateway:8701}
+      SIGNER_URL:        ${SIGNER_URL:-http://consensus_signer:8700}
+      AIMLAPI_KEY:    ${AIMLAPI_KEY}
+      FEATHERLESS_KEY: ${FEATHERLESS_KEY}
+      # Route all outbound internet traffic through Squid allow-list
+      HTTP_PROXY:  http://egress_proxy:3128
+      HTTPS_PROXY: http://egress_proxy:3128
+      # Bypass proxy for internal services (direct zone network routing)
+      NO_PROXY: pii_gateway,consensus_signer,localhost,127.0.0.1
+    networks:
+      - zone_agents
+      - zone_coord
+    restart: unless-stopped
+
+  # ── Zone 2 ─ KYC Guardian ─────────────────────────────────────────────────
+  kyc_guardian:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "band_agents.run_kyc_agent"]
+    depends_on:
+      pii_gateway:
+        condition: service_healthy
+      egress_proxy:
+        condition: service_started
+    environment:
+      BAND_KYC_AGENT_ID:  ${BAND_KYC_AGENT_ID}
+      BAND_KYC_API_KEY:   ${BAND_KYC_API_KEY}
+      SCOPE_SERVICE_URL:  ${SCOPE_SERVICE_URL:-http://pii_gateway:8701}
+      AIMLAPI_KEY:        ${AIMLAPI_KEY}
+      FEATHERLESS_KEY:    ${FEATHERLESS_KEY}
+      HTTP_PROXY:  http://egress_proxy:3128
+      HTTPS_PROXY: http://egress_proxy:3128
+      NO_PROXY: pii_gateway,localhost,127.0.0.1
+    networks:
+      - zone_agents
+    restart: unless-stopped
+
+  # ── Zone 2 ─ Dynamic Compliance ───────────────────────────────────────────
+  dynamic_compliance:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "band_agents.run_compliance_agent"]
+    depends_on:
+      pii_gateway:
+        condition: service_healthy
+      egress_proxy:
+        condition: service_started
+    environment:
+      BAND_COMPLIANCE_AGENT_ID: ${BAND_COMPLIANCE_AGENT_ID}
+      BAND_COMPLIANCE_API_KEY:  ${BAND_COMPLIANCE_API_KEY}
+      SCOPE_SERVICE_URL:  ${SCOPE_SERVICE_URL:-http://pii_gateway:8701}
+      AIMLAPI_KEY:        ${AIMLAPI_KEY}
+      FEATHERLESS_KEY:    ${FEATHERLESS_KEY}
+      HTTP_PROXY:  http://egress_proxy:3128
+      HTTPS_PROXY: http://egress_proxy:3128
+      NO_PROXY: pii_gateway,localhost,127.0.0.1
+    networks:
+      - zone_agents
+    restart: unless-stopped
+
+  # ── Zone 2 ─ Doc Auditor ──────────────────────────────────────────────────
+  doc_auditor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "band_agents.run_docauditor_agent"]
+    depends_on:
+      pii_gateway:
+        condition: service_healthy
+      egress_proxy:
+        condition: service_started
+    environment:
+      BAND_DOCAUDITOR_AGENT_ID: ${BAND_DOCAUDITOR_AGENT_ID}
+      BAND_DOCAUDITOR_API_KEY:  ${BAND_DOCAUDITOR_API_KEY}
+      SCOPE_SERVICE_URL:  ${SCOPE_SERVICE_URL:-http://pii_gateway:8701}
+      AIMLAPI_KEY:        ${AIMLAPI_KEY}
+      FEATHERLESS_KEY:    ${FEATHERLESS_KEY}
+      HTTP_PROXY:  http://egress_proxy:3128
+      HTTPS_PROXY: http://egress_proxy:3128
+      NO_PROXY: pii_gateway,localhost,127.0.0.1
+    networks:
+      - zone_agents
+    restart: unless-stopped
+
+  # ── Zone 2 ─ Stress-Test Simulator ───────────────────────────────────────
+  stress_test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "band_agents.run_stresstest_agent"]
+    depends_on:
+      pii_gateway:
+        condition: service_healthy
+      egress_proxy:
+        condition: service_started
+    environment:
+      BAND_STRESSTEST_AGENT_ID: ${BAND_STRESSTEST_AGENT_ID}
+      BAND_STRESSTEST_API_KEY:  ${BAND_STRESSTEST_API_KEY}
+      SCOPE_SERVICE_URL:  ${SCOPE_SERVICE_URL:-http://pii_gateway:8701}
+      AIMLAPI_KEY:        ${AIMLAPI_KEY}
+      FEATHERLESS_KEY:    ${FEATHERLESS_KEY}
+      HTTP_PROXY:  http://egress_proxy:3128
+      HTTPS_PROXY: http://egress_proxy:3128
+      NO_PROXY: pii_gateway,localhost,127.0.0.1
+    networks:
+      - zone_agents
+    restart: unless-stopped
+
+  # ── Zone 2 ─ Asset Tokenizer ──────────────────────────────────────────────
+  asset_tokenizer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "band_agents.run_tokenizer_agent"]
+    depends_on:
+      pii_gateway:
+        condition: service_healthy
+      egress_proxy:
+        condition: service_started
+    environment:
+      BAND_TOKENIZER_AGENT_ID: ${BAND_TOKENIZER_AGENT_ID}
+      BAND_TOKENIZER_API_KEY:  ${BAND_TOKENIZER_API_KEY}
+      SCOPE_SERVICE_URL:  ${SCOPE_SERVICE_URL:-http://pii_gateway:8701}
+      AIMLAPI_KEY:        ${AIMLAPI_KEY}
+      FEATHERLESS_KEY:    ${FEATHERLESS_KEY}
+      HTTP_PROXY:  http://egress_proxy:3128
+      HTTPS_PROXY: http://egress_proxy:3128
+      NO_PROXY: pii_gateway,localhost,127.0.0.1
+    networks:
+      - zone_agents
+    restart: unless-stopped
+
+  # ── Backend ─ FastAPI Public Gateway ──────────────────────────────────────
+  # Joins zone_pii (reads db1_pii for full PII), edge (serves :8000, calls Band REST).
+  # Does NOT join zone_agents — backend uses band_bridge directly, not via egress_proxy.
+  # Layer-2 human-authority signing via authorization_signer.py (local ECDSA, no network).
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on:
+      db1_pii:
+        condition: service_healthy
+      pii_seed:
+        condition: service_completed_successfully
+    environment:
+      PII_DB_DSN:    ${PII_DB_DSN}
+      JWT_SECRET:    ${JWT_SECRET}
+      AIMLAPI_KEY:   ${AIMLAPI_KEY}
+      # band_bridge env — backend triggers orchestrator and polls Band REST
+      THENVOI_REST_URL:           ${THENVOI_REST_URL:-https://app.band.ai}
+      BAND_BACKEND_API_KEY:       ${BAND_BACKEND_API_KEY}
+      BAND_BACKEND_AGENT_ID:      ${BAND_BACKEND_AGENT_ID}
+      BAND_ORCHESTRATOR_AGENT_ID: ${BAND_ORCHESTRATOR_AGENT_ID}
+      BAND_ORCHESTRATOR_HANDLE:   ${BAND_ORCHESTRATOR_HANDLE:-Orchestrator}
+      BAND_KYC_AGENT_ID:          ${BAND_KYC_AGENT_ID}
+      BAND_COMPLIANCE_AGENT_ID:   ${BAND_COMPLIANCE_AGENT_ID}
+      BAND_DOCAUDITOR_AGENT_ID:   ${BAND_DOCAUDITOR_AGENT_ID}
+      BAND_STRESSTEST_AGENT_ID:   ${BAND_STRESSTEST_AGENT_ID}
+      BAND_TOKENIZER_AGENT_ID:    ${BAND_TOKENIZER_AGENT_ID}
+      BAND_CONSENSUS_AGENT_ID:    ${BAND_CONSENSUS_AGENT_ID}
+      BAND_GOVERNANCE_AGENT_ID:   ${BAND_GOVERNANCE_AGENT_ID}
+      BAND_BRIDGE_POLL_INTERVAL:  ${BAND_BRIDGE_POLL_INTERVAL:-5}
+      BAND_BRIDGE_TIMEOUT:        ${BAND_BRIDGE_TIMEOUT:-180}
+      # Persistent paths (case_store SQLite + Layer-2 auth signing key)
+      CASES_DB_PATH: /app/data/brightuity_cases.db
+      AUTH_KEY_PATH: /app/data/auth_private_key.pem
+    volumes:
+      - case_store_data:/app/data
+    ports:
+      - "8000:8000"
+    networks:
+      - zone_pii
+      - edge
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+# ── Named volumes ─────────────────────────────────────────────────────────────
+volumes:
+  pii_db_data:    # PostgreSQL data for db1_pii
+    driver: local
+  case_store_data: # Backend SQLite (cases.db) + Layer-2 auth key
+    driver: local
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  zone_pii:
+    driver: bridge
+    internal: true   # db1_pii has ZERO internet routing path
+
+  zone_agents:
+    driver: bridge
+    internal: true   # Band agents can only exit via egress_proxy (on edge)
+
+  zone_coord:
+    driver: bridge
+    internal: true   # consensus_signer has ZERO internet routing path
+
+  edge:
+    driver: bridge   # Internet-capable: egress_proxy exits here; backend serves :8000 here
