@@ -30,9 +30,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 from band.core.simple_adapter import SimpleAdapter
 from band.core.protocols import AgentToolsProtocol
@@ -143,14 +146,39 @@ class StressTestAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             return
 
         request_id = match.group(1).upper()
-        client = _CLIENT_INDEX.get(request_id)
-        if client is None:
-            await tools.send_message(
-                f"No client found for `{request_id}`. "
-                "Check the request_id and try again.",
-                mentions=[sender],
-            )
-            return
+        scope_url = os.getenv("SCOPE_SERVICE_URL", "").strip()
+        if scope_url:
+            try:
+                _pii_resp = httpx.get(
+                    f"{scope_url}/scope/stress_test/{request_id}",
+                    timeout=10.0,
+                )
+                if _pii_resp.status_code == 404:
+                    await tools.send_message(
+                        f"No client found for `{request_id}`. "
+                        "Check the request_id and try again.",
+                        mentions=[sender],
+                    )
+                    return
+                _pii_resp.raise_for_status()
+                client: dict[str, Any] = _pii_resp.json()
+            except Exception as exc:
+                logger.exception("PII gateway error for %s", request_id)
+                await tools.send_message(
+                    f"Stress-test failed for `{request_id}`: "
+                    f"PII gateway unavailable — {exc}",
+                    mentions=[sender],
+                )
+                return
+        else:
+            client = _CLIENT_INDEX.get(request_id)
+            if client is None:
+                await tools.send_message(
+                    f"No client found for `{request_id}`. "
+                    "Check the request_id and try again.",
+                    mentions=[sender],
+                )
+                return
 
         key = (room_id, request_id)
         if key in self._in_flight:
