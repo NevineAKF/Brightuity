@@ -93,6 +93,14 @@ logger = logging.getLogger(__name__)
 
 _CLIENTS_JSON = Path(__file__).parent.parent / "database" / "brightuity_clients.json"
 
+# UUID of the "Brightuity Backend" Band agent that posts case-trigger messages
+# on behalf of the backend service.  Read once at import time from the env.
+# When empty (not configured), only human Users can trigger pipeline cases —
+# identical to the original behavior.  Must NOT be in _agent_id_map (the
+# specialist map) — the routing guard below ensures it reaches case-start,
+# never _collect_verdict.
+_BACKEND_AGENT_ID: str = os.getenv("BAND_BACKEND_AGENT_ID", "").strip()
+
 # ── Heartbeat timing constants ──────────────────────────────────────────────────
 # See module docstring "HEARTBEAT MODEL" for the full rationale.
 
@@ -285,15 +293,27 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
         content = (msg.content or "").strip()
         sender  = msg.sender_id
 
-        # ── Agent reply → accumulate verdict ──────────────────────────────────
-        if msg.sender_type == "Agent":
-            await self._collect_verdict(msg, tools, room_id, content, sender)
-            return
+        # ── Route this message ─────────────────────────────────────────────────
+        # ROUTING SAFETY: _BACKEND_AGENT_ID must be classified here, BEFORE the
+        # general Agent branch, so the backend UUID is never mis-routed to
+        # _collect_verdict as a specialist verdict.  When _BACKEND_AGENT_ID is
+        # empty the flag is always False and only Users can start cases.
+        is_backend_trigger = (
+            msg.sender_type == "Agent"
+            and bool(_BACKEND_AGENT_ID)
+            and msg.sender_id == _BACKEND_AGENT_ID
+        )
+        is_human_trigger = msg.sender_type == "User"
 
-        # ── Human trigger → start new pipeline case ───────────────────────────
-        if msg.sender_type != "User":
-            return  # skip system / unknown sender types
+        if not (is_backend_trigger or is_human_trigger):
+            if msg.sender_type == "Agent":
+                # Specialist agents (KYC, Doc, Compliance, Stress, Tokenizer).
+                # GUARANTEE: backend UUID was matched above — it never
+                # reaches this branch.
+                await self._collect_verdict(msg, tools, room_id, content, sender)
+            return  # also covers system / unknown sender types
 
+        # ── Case trigger: human user OR backend agent ─────────────────────────
         req = _REQ_ID_RE.search(content)
         if not req:
             await tools.send_message(
@@ -372,6 +392,11 @@ class OrchestratorAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             "seal_result":     None,
         }
         logger.info("orchestrator: NEW CASE %s room=%s", request_id, room_id)
+        if is_backend_trigger:
+            logger.info(
+                "orchestrator: case %s triggered by backend agent (sender=%s)",
+                request_id, sender,
+            )
 
         # Post FOUR separate messages — one @mention per stage-1 agent.
         # Individual targeted mentions are far more reliably delivered than a

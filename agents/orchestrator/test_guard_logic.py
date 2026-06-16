@@ -244,5 +244,154 @@ def test_unrecognised_state_rejected_safely():
     assert tools.sent, "Expected a rejection/error message for unrecognised state"
 
 
+# ── Backend-agent trigger routing ────────────────────────────────────────────
+#
+# These tests patch band_agents.orchestrator_adapter._BACKEND_AGENT_ID at the
+# module level (restoring it in a finally block) so the routing guard sees a
+# known fake UUID without affecting any other test.
+
+import band_agents.orchestrator_adapter as _adapter_module
+
+_FAKE_BACKEND_UUID = "backend-test-uuid-0000-000000000000"
+_OTHER_AGENT_UUID  = "specialist-test-uuid-1111-111111111111"
+_TRIGGER_ROOM      = "room-routing-test"
+_TRIGGER_REQ       = "REQ-9998"
+_TRIGGER_CASE_KEY  = (_TRIGGER_ROOM, _TRIGGER_REQ)
+
+
+class _BackendMsg:
+    """Simulates a Band message posted by the backend agent with a valid REQ-id."""
+    sender_type = "Agent"
+    sender_id   = _FAKE_BACKEND_UUID
+    sender_name = "Brightuity Backend"
+    content     = f"@Orchestrator {_TRIGGER_REQ}"
+
+
+class _OtherAgentMsg:
+    """Simulates a Band message posted by a different (specialist) agent."""
+    sender_type = "Agent"
+    sender_id   = _OTHER_AGENT_UUID
+    sender_name = "Some Specialist"
+    content     = f"@Orchestrator {_TRIGGER_REQ}"
+
+
+def _run_routing(msg_cls, room: str = _TRIGGER_ROOM) -> tuple[OrchestratorAdapter, _MockTools]:
+    adapter = _make_adapter()
+    tools   = _MockTools()
+    asyncio.run(adapter.on_message(
+        msg_cls(), tools, [], None, None,
+        is_session_bootstrap=False,
+        room_id=room,
+    ))
+    return adapter, tools
+
+
+def test_backend_agent_routes_to_case_start():
+    """
+    A message whose sender_type == 'Agent' and sender_id == _BACKEND_AGENT_ID
+    must be routed to case-start logic, NOT to _collect_verdict.
+
+    Proof: if case-start ran, the case exists with state == 'awaiting_stage1'.
+    If verdict collection ran instead, no case is created (unknown UUID, early
+    return from _collect_verdict).
+    """
+    orig = _adapter_module._BACKEND_AGENT_ID
+    _adapter_module._BACKEND_AGENT_ID = _FAKE_BACKEND_UUID
+    try:
+        adapter, tools = _run_routing(_BackendMsg)
+
+        # Case must have been created by the case-start path.
+        assert _TRIGGER_CASE_KEY in adapter._cases, (
+            "Backend agent trigger must create a pipeline case"
+        )
+        case = adapter._cases[_TRIGGER_CASE_KEY]
+        assert case["state"] == "awaiting_stage1"
+
+        # Initiator must be the backend agent's sender_id (not a human UUID).
+        assert case["initiator"] == _FAKE_BACKEND_UUID
+
+        # Verdicts must be initialised to None (fresh case).
+        assert all(v is None for v in case["verdicts"].values())
+
+        # No rejection message must have been sent.
+        assert not any("already being processed" in m for m in tools.sent)
+    finally:
+        _adapter_module._BACKEND_AGENT_ID = orig
+        # Cancel any chase task left running.
+        adapter, _ = _make_adapter(), None  # no need to re-use adapter after finally
+
+
+def test_backend_agent_routes_to_case_start_cancel_chase():
+    """Same as above but also cleans up the chase task to avoid asyncio warnings."""
+    orig = _adapter_module._BACKEND_AGENT_ID
+    _adapter_module._BACKEND_AGENT_ID = _FAKE_BACKEND_UUID
+    adapter = None
+    try:
+        adapter, tools = _run_routing(_BackendMsg, room="room-routing-cancel")
+        case_key = ("room-routing-cancel", _TRIGGER_REQ)
+        assert case_key in adapter._cases
+        assert adapter._cases[case_key]["state"] == "awaiting_stage1"
+    finally:
+        _adapter_module._BACKEND_AGENT_ID = orig
+        if adapter is not None:
+            chase = (adapter._cases.get(("room-routing-cancel", _TRIGGER_REQ)) or {}).get("chase_task")
+            if chase and not chase.done():
+                chase.cancel()
+
+
+def test_other_agent_routes_to_verdict_collection_not_case_start():
+    """
+    A message whose sender_type == 'Agent' and sender_id != _BACKEND_AGENT_ID
+    must be routed to _collect_verdict, NOT to case-start.
+
+    Proof: no case is created (unknown UUID → early return from _collect_verdict),
+    and no 'I need a request_id' error message is sent (which would only appear
+    on the case-start path when content has no REQ-id — but content DOES have a
+    REQ-id here, so if case-start ran, a case WOULD be created).
+    """
+    orig = _adapter_module._BACKEND_AGENT_ID
+    _adapter_module._BACKEND_AGENT_ID = _FAKE_BACKEND_UUID
+    try:
+        adapter, tools = _run_routing(_OtherAgentMsg)
+
+        # No case must have been created — verdict-collection path taken.
+        assert _TRIGGER_CASE_KEY not in adapter._cases, (
+            "A non-backend agent message must NOT create a case "
+            "(it should go to _collect_verdict, not case-start)"
+        )
+
+        # No trigger error message should have been sent.
+        assert not any("I need a" in m for m in tools.sent), (
+            f"Unexpected case-start error message sent: {tools.sent}"
+        )
+    finally:
+        _adapter_module._BACKEND_AGENT_ID = orig
+
+
+def test_backend_agent_inactive_when_env_unset():
+    """
+    When _BACKEND_AGENT_ID is empty (env var not configured), a message with
+    sender_type == 'Agent' must always go to _collect_verdict regardless of UUID.
+    No agent can act as a trigger when the backend UUID is unconfigured.
+    """
+    orig = _adapter_module._BACKEND_AGENT_ID
+    _adapter_module._BACKEND_AGENT_ID = ""   # simulate unset env var
+    try:
+        # Use the backend UUID as sender — but with the env var empty, it must
+        # NOT be treated as a trigger.
+        adapter, tools = _run_routing(_BackendMsg, room="room-unset-test")
+        case_key = ("room-unset-test", _TRIGGER_REQ)
+
+        # No case must have been created.
+        assert case_key not in adapter._cases, (
+            "When BAND_BACKEND_AGENT_ID is unset, no Agent message should trigger a case"
+        )
+        assert not tools.sent, (
+            f"No message should be sent when the env var is unset: {tools.sent}"
+        )
+    finally:
+        _adapter_module._BACKEND_AGENT_ID = orig
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
