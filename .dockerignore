@@ -1,0 +1,54 @@
+# ── Secrets — MUST NEVER enter the image ─────────────────────────────────────
+.env
+.env.*
+*.pem
+*.key
+database/auth_private_key.pem
+
+# ── Version control ───────────────────────────────────────────────────────────
+.git
+.gitignore
+
+# ── Python virtual environment (Windows venv — wrong architecture for Linux) ──
+venv/
+.venv/
+env/
+ENV/
+
+# ── Python bytecode caches ────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ── Generated / runtime data ──────────────────────────────────────────────────
+# RAG index: generated artifact rebuilt by build_index.py inside the container.
+rag_corpus/chroma_index/
+# SQLite databases produced at runtime.
+*.db
+database/band_results/
+
+# ── Test and linting caches ───────────────────────────────────────────────────
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# ── Docker own files (no need to COPY into the image) ────────────────────────
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# ── IDE / editor metadata ─────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.iml
+.spyderproject
+.ropeproject
+
+# ── Miscellaneous development artefacts ──────────────────────────────────────
+tempCodeRunnerFile.py
+.pdm-python
+.pdm-build/
