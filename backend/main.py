@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
@@ -29,6 +30,11 @@ from backend import band_bridge, case_state, case_store, authorization_signer, p
 from agents.orchestrator.orchestrator import run_pipeline
 from agents.governance_audit.logic import assemble_evidence_package
 
+# Ensure all module loggers (including band_bridge) emit INFO to stdout.
+# basicConfig is a no-op if root already has handlers, so this is safe to call
+# unconditionally — it will not interfere with uvicorn's own logger config
+# (which only attaches handlers to the uvicorn.* hierarchy, not to root).
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
