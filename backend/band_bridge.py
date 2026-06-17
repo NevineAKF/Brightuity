@@ -45,6 +45,8 @@ from typing import Any
 import httpx
 from dotenv import load_dotenv
 
+from backend import case_store
+
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
 logger = logging.getLogger(__name__)
@@ -124,6 +126,10 @@ def run_case_via_band(request_id: str) -> tuple[dict, list[dict]]:
     with _api_client() as client:
         chat_id = _create_or_reuse_room(client, request_id)
         logger.info("band_bridge: REQ %s created/polling chat_id=%s", request_id, chat_id)
+        try:
+            case_store.set_band_chat_id(request_id, chat_id)
+        except Exception as e:
+            logger.warning("band_bridge: could not persist chat_id for %s: %s", request_id, e)
         _add_participants(client, chat_id)
         _post_trigger(client, chat_id, request_id)
         return _await_result(client, chat_id, request_id)

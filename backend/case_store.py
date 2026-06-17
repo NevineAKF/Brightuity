@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS cases (
     consensus_hash       TEXT,
     ecdsa_signature      TEXT,
     sealed_at            TEXT,
+    band_chat_id         TEXT,
 
     -- Human decision (written when Head of Digital Assets signs — Phase 2)
     completed_at         TEXT,
@@ -135,11 +136,20 @@ def init_db() -> None:
     """
     Idempotent schema initialiser. Safe to call on every startup.
     Creates the cases table and indexes only if they don't already exist.
+    Also runs safe ALTER TABLE migrations for columns added after initial deploy.
     """
     with _connect() as conn:
         conn.execute(_CREATE_CASES)
         conn.execute(_IDX_STATUS)
         conn.execute(_IDX_REQUEST_ID)
+        # Idempotent migration: add band_chat_id to existing databases.
+        # SQLite raises OperationalError("duplicate column name: ...") if the
+        # column already exists — catch and ignore that specific error only.
+        try:
+            conn.execute("ALTER TABLE cases ADD COLUMN band_chat_id TEXT")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
     logger.info("case_store: initialised at %s", get_db_path())
 
 
@@ -205,6 +215,17 @@ def set_status(request_id: str, status: str) -> None:
             (status, now, request_id),
         )
     logger.info("case_store: %s → %s", request_id, status)
+
+
+def set_band_chat_id(request_id: str, chat_id: str) -> None:
+    """Persist the Band chat room id for a case."""
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE cases SET band_chat_id = ?, updated_at = ? WHERE request_id = ?",
+            (chat_id, now, request_id),
+        )
+    logger.info("case_store: band_chat_id set for %s (%s)", request_id, chat_id)
 
 
 def save_pipeline_result(
