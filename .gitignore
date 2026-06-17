@@ -235,3 +235,4 @@ database/*.db
 auth_private_key.pem
 # Any SQLite/database file at any path (database/*.db already above, belt-and-suspenders).
 *.db
+tmp/
