@@ -88,3 +88,12 @@ export function evidencePdfUrl(requestId, { download = false } = {}) {
 export async function authorizeCase(requestId, payload) {
   return request('POST', `/cases/${encodeURIComponent(requestId)}/authorize`, payload)
 }
+
+/**
+ * GET /cases/{id}/band-messages — fetch live Band coordination room messages.
+ * @param {string} requestId
+ * @returns {Promise<{ request_id: string, chat_id: string|null, messages: object[], status: string, error?: string }>}
+ */
+export async function getBandMessages(requestId) {
+  return request('GET', `/cases/${encodeURIComponent(requestId)}/band-messages`)
+}
