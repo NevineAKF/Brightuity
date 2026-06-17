@@ -8,18 +8,30 @@ const C = {
   amber:"#FF9800", white:"#F0F4FF", muted:"#6B8CAE",
 };
 
+function Flag({ code, w=20 }) {
+  const h = Math.round(w*0.67);
+  const f = {
+    DE:<g><rect width="90" height="20" fill="#000"/><rect y="20" width="90" height="20" fill="#D00"/><rect y="40" width="90" height="20" fill="#FFCE00"/></g>,
+    BG:<g><rect width="90" height="20" fill="#fff"/><rect y="20" width="90" height="20" fill="#00966E"/><rect y="40" width="90" height="20" fill="#D62612"/></g>,
+    IT:<g><rect width="30" height="60" fill="#009246"/><rect x="30" width="30" height="60" fill="#fff"/><rect x="60" width="30" height="60" fill="#CE2B37"/></g>,
+    IE:<g><rect width="30" height="60" fill="#169B62"/><rect x="30" width="30" height="60" fill="#fff"/><rect x="60" width="30" height="60" fill="#FF883E"/></g>,
+    FR:<g><rect width="30" height="60" fill="#0055A4"/><rect x="30" width="30" height="60" fill="#fff"/><rect x="60" width="30" height="60" fill="#EF4135"/></g>,
+    GR:<g><rect width="90" height="60" fill="#0D5EAF"/><rect y="6.7" width="90" height="6.7" fill="#fff"/><rect y="20" width="90" height="6.7" fill="#fff"/><rect y="33.3" width="90" height="6.7" fill="#fff"/><rect y="46.7" width="90" height="6.7" fill="#fff"/><rect width="33.3" height="33.3" fill="#0D5EAF"/><rect x="13.3" width="6.7" height="33.3" fill="#fff"/><rect y="13.3" width="33.3" height="6.7" fill="#fff"/></g>,
+  };
+  return <svg viewBox="0 0 90 60" width={w} height={h} style={{ borderRadius:2, flexShrink:0, verticalAlign:"middle", border:"1px solid rgba(255,255,255,0.15)" }}>{f[code]||null}</svg>;
+}
+
 const REQUESTS = [
-  { id:"REQ-2041", name:"Marcus Weber",   flag:"🇩🇪", nationality:"German",    asset:"Commercial Real Estate", detail:"Grade A office, Frankfurt", assetFlag:"🇩🇪", assetLoc:"Frankfurt, Germany", jurisdiction:"EU · MiCA", value:2500000, docId:"EVP-DOC-3F2A9C4E", priority:"High",   submitted:"Today, 09:14" },
-  { id:"REQ-2042", name:"Sofia Andreou",  flag:"🇬🇷", nationality:"Greek",     asset:"Residential Property",   detail:"Luxury apartment, Athens",  assetFlag:"🇬🇷", assetLoc:"Athens, Greece",   jurisdiction:"EU · MiCA", value:850000,  docId:"EVP-DOC-7B1D5E8A", priority:"Low",    submitted:"Today, 08:52" },
-  { id:"REQ-2043", name:"Viktor Petrov",  flag:"🇧🇬", nationality:"Bulgarian", asset:"Gold Reserve",           detail:"1,200 troy oz bullion",    assetFlag:"🇧🇬", assetLoc:"Sofia, Bulgaria",  jurisdiction:"EU · MiCA", value:1200000, docId:"EVP-DOC-2C8F1A3D", priority:"High",   submitted:"Today, 10:31" },
-  { id:"REQ-2044", name:"Isabella Rossi", flag:"🇮🇹", nationality:"Italian",   asset:"Commercial Real Estate", detail:"Mixed-use complex, Milan", assetFlag:"🇮🇹", assetLoc:"Milan, Italy",     jurisdiction:"EU · MiCA", value:4200000, docId:"EVP-DOC-9A4C7E2B", priority:"High",   submitted:"Yesterday, 17:20" },
-  { id:"REQ-2045", name:"Liam O'Brien",   flag:"🇮🇪", nationality:"Irish",     asset:"Government Bond Portfolio", detail:"EU sovereign bonds, AAA", assetFlag:"🇮🇪", assetLoc:"Dublin, Ireland", jurisdiction:"EU · MiCA", value:5750000, docId:"EVP-DOC-4D3B6F1C", priority:"Medium", submitted:"Yesterday, 14:05" },
-  { id:"REQ-2046", name:"Amélie Dupont",  flag:"🇫🇷", nationality:"French",    asset:"Fine Art Collection",    detail:"12 provenance-verified",   assetFlag:"🇫🇷", assetLoc:"Paris, France",    jurisdiction:"EU · MiCA", value:3100000, docId:"EVP-DOC-6E9A2C5D", priority:"Medium", submitted:"Yesterday, 11:48" },
+  { id:"REQ-2041", name:"Marcus Weber",   flagCode:"DE", nationality:"German",    asset:"Commercial Real Estate", detail:"Grade A office, Frankfurt", assetFlagCode:"DE", assetLoc:"Frankfurt, Germany", jurisdiction:"EU · MiCA", value:2500000, docId:"EVP-DOC-3F2A9C4E", priority:"High",   submitted:"Today, 09:14" },
+  { id:"REQ-2042", name:"Sofia Andreou",  flagCode:"GR", nationality:"Greek",     asset:"Residential Property",   detail:"Luxury apartment, Athens",  assetFlagCode:"GR", assetLoc:"Athens, Greece",   jurisdiction:"EU · MiCA", value:850000,  docId:"EVP-DOC-7B1D5E8A", priority:"Low",    submitted:"Today, 08:52" },
+  { id:"REQ-2043", name:"Viktor Petrov",  flagCode:"BG", nationality:"Bulgarian", asset:"Gold Reserve",           detail:"1,200 troy oz bullion",    assetFlagCode:"BG", assetLoc:"Sofia, Bulgaria",  jurisdiction:"EU · MiCA", value:1200000, docId:"EVP-DOC-2C8F1A3D", priority:"High",   submitted:"Today, 10:31" },
+  { id:"REQ-2044", name:"Isabella Rossi", flagCode:"IT", nationality:"Italian",   asset:"Commercial Real Estate", detail:"Mixed-use complex, Milan", assetFlagCode:"IT", assetLoc:"Milan, Italy",     jurisdiction:"EU · MiCA", value:4200000, docId:"EVP-DOC-9A4C7E2B", priority:"High",   submitted:"Yesterday, 17:20" },
+  { id:"REQ-2045", name:"Liam O'Brien",   flagCode:"IE", nationality:"Irish",     asset:"Government Bond Portfolio", detail:"EU sovereign bonds, AAA", assetFlagCode:"IE", assetLoc:"Dublin, Ireland", jurisdiction:"EU · MiCA", value:5750000, docId:"EVP-DOC-4D3B6F1C", priority:"Medium", submitted:"Yesterday, 14:05" },
+  { id:"REQ-2046", name:"Amélie Dupont",  flagCode:"FR", nationality:"French",    asset:"Fine Art Collection",    detail:"12 provenance-verified",   assetFlagCode:"FR", assetLoc:"Paris, France",    jurisdiction:"EU · MiCA", value:3100000, docId:"EVP-DOC-6E9A2C5D", priority:"Medium", submitted:"Yesterday, 11:48" },
 ];
 
 const DONE = 2;
 const TOTAL = REQUESTS.length;
-const PENDING = REQUESTS.length;
 const fmtEur = v => "€" + (v >= 1000000 ? (v/1000000).toFixed(2)+"M" : (v/1000).toFixed(0)+"K");
 const PRI = {
   High:   { color:C.amber, bg:"#FF980018", border:"#FF980055", bar:C.amber },
@@ -63,7 +75,7 @@ function CaseCard({ c, onReview, onProcess }) {
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:4 }}>
             <span style={{ fontSize:14, fontWeight:700, minWidth:0, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>{c.name}</span>
-            <span style={{ fontSize:12, flexShrink:0 }}>{c.flag}</span>
+            <Flag code={c.flagCode} w={18}/>
             <span style={{ marginLeft:"auto", flexShrink:0, fontSize:8.5, fontWeight:700, letterSpacing:"0.5px", color:p.color, background:p.bg, border:`1px solid ${p.border}`, padding:"2px 8px", borderRadius:10 }}>{c.priority.toUpperCase()}</span>
           </div>
           <div style={{ fontSize:9.5, color:C.muted, fontFamily:"monospace", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.id} · 🔒 {c.docId.slice(0,12)}</div>
@@ -73,7 +85,10 @@ function CaseCard({ c, onReview, onProcess }) {
         <div style={{ minWidth:0 }}>
           <div style={{ fontSize:9, color:C.muted, letterSpacing:"1px", marginBottom:2 }}>ASSET</div>
           <div style={{ fontSize:12, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.asset}</div>
-          <div style={{ fontSize:10, color:C.muted, marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.assetFlag} {c.assetLoc}</div>
+          <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:10, color:C.muted, marginTop:3, minWidth:0 }}>
+            <Flag code={c.assetFlagCode} w={15}/>
+            <span style={{ whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.assetLoc}</span>
+          </div>
         </div>
         <div style={{ textAlign:"right", flexShrink:0 }}>
           <div style={{ fontSize:9, color:C.muted, letterSpacing:"1px", marginBottom:2 }}>VALUE</div>
@@ -91,9 +106,9 @@ function CaseCard({ c, onReview, onProcess }) {
 
 function Row({ label, value, mono, vStyle }) {
   return (
-    <div style={{ display:"flex", alignItems:"baseline", gap:10, padding:"8px 12px", background:C.navyLight, borderRadius:8, border:`1px solid ${C.border}` }}>
+    <div style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", background:C.navyLight, borderRadius:8, border:`1px solid ${C.border}` }}>
       <span style={{ fontSize:10, color:C.muted, minWidth:130, flexShrink:0 }}>{label}</span>
-      <span style={{ fontSize:12, color:C.white, fontFamily:mono?"monospace":"inherit", ...(vStyle||{}) }}>{value}</span>
+      <span style={{ fontSize:12, color:C.white, fontFamily:mono?"monospace":"inherit", display:"flex", alignItems:"center", gap:7, ...(vStyle||{}) }}>{value}</span>
     </div>
   );
 }
@@ -111,7 +126,7 @@ function Dossier({ c, onClose, onProcess }) {
           <div>
             <div style={{ display:"flex", alignItems:"center", gap:8 }}>
               <span style={{ fontSize:17, fontWeight:800, color:C.white }}>{c.name}</span>
-              <span style={{ fontSize:14 }}>{c.flag}</span>
+              <Flag code={c.flagCode} w={22}/>
             </div>
             <div style={{ fontSize:10.5, color:C.muted, marginTop:3 }}>Client Dossier · {c.id}</div>
             <span style={{ display:"inline-block", marginTop:7, fontSize:8.5, fontWeight:700, letterSpacing:"0.5px", color:C.green, background:"#4CAF501A", border:"1px solid #4CAF5044", padding:"3px 8px", borderRadius:20 }}>✓ DOCUMENTS ON FILE</span>
@@ -120,14 +135,14 @@ function Dossier({ c, onClose, onProcess }) {
         <div style={{ fontSize:9, color:C.gold, letterSpacing:"1px", fontWeight:600, marginBottom:8 }}>CLIENT</div>
         <div style={{ display:"flex", flexDirection:"column", gap:7, marginBottom:18 }}>
           <Row label="Full Name" value={c.name}/>
-          <Row label="Citizenship" value={`${c.flag} ${c.nationality}`}/>
+          <Row label="Citizenship" value={<><Flag code={c.flagCode} w={20}/> {c.nationality}</>}/>
           <Row label="Encrypted Doc ID" value={`🔒 ${c.docId}`} mono vStyle={{ color:C.cyan }}/>
         </div>
         <div style={{ fontSize:9, color:C.gold, letterSpacing:"1px", fontWeight:600, marginBottom:8 }}>ASSET</div>
         <div style={{ display:"flex", flexDirection:"column", gap:7, marginBottom:24 }}>
           <Row label="Asset Type" value={c.asset} vStyle={{ fontWeight:600 }}/>
           <Row label="Description" value={c.detail}/>
-          <Row label="Asset Location" value={`${c.assetFlag} ${c.assetLoc}`}/>
+          <Row label="Asset Location" value={<><Flag code={c.assetFlagCode} w={20}/> {c.assetLoc}</>}/>
           <Row label="Jurisdiction" value={c.jurisdiction}/>
           <Row label="Declared Value" value={fmtEur(c.value)} vStyle={{ color:C.gold, fontWeight:800, fontSize:15 }}/>
           <Row label="Submitted" value={c.submitted}/>
@@ -163,7 +178,6 @@ export default function Dashboard() {
           </div>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:18, flexShrink:0 }}>
-          <span style={{ fontSize:11, color:C.gold, fontWeight:700, whiteSpace:"nowrap", flexShrink:0 }}>{PENDING} pending cases</span>
           <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
             <div style={{ textAlign:"right", whiteSpace:"nowrap", flexShrink:0 }}>
               <div style={{ fontSize:12, fontWeight:600, color:C.white }}>{user?.name ?? "Nevine AKF"}</div>
@@ -186,7 +200,7 @@ export default function Dashboard() {
             <span style={{ fontSize:18, fontWeight:800, color:C.gold }}>{DONE}/{TOTAL}</span><span style={{ fontSize:10.5, color:C.muted }}>done today</span>
           </div>
           <div style={{ padding:"10px 20px", borderRadius:10, background:`${C.amber}12`, border:`1px solid ${C.amber}44`, display:"flex", alignItems:"baseline", gap:8 }}>
-            <span style={{ fontSize:18, fontWeight:800, color:C.amber }}>{PENDING}</span><span style={{ fontSize:10.5, color:C.muted }}>pending</span>
+            <span style={{ fontSize:18, fontWeight:800, color:C.amber }}>{TOTAL - DONE}</span><span style={{ fontSize:10.5, color:C.muted }}>pending</span>
           </div>
         </div>
         <div style={{ marginTop:22, marginBottom:18, maxWidth:440, position:"relative" }}>
@@ -194,7 +208,7 @@ export default function Dashboard() {
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name, ID, or asset type…" style={{ width:"100%", boxSizing:"border-box", padding:"11px 14px 11px 36px", background:C.navyLight, border:`1px solid ${C.border}`, borderRadius:10, color:C.white, fontSize:13, outline:"none", fontFamily:"inherit" }}/>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:14 }}>
-          <span style={{ fontSize:10.5, fontWeight:700, color:C.muted, letterSpacing:"0.14em", whiteSpace:"nowrap" }}>PENDING REQUESTS — {filtered.length}</span>
+          <span style={{ fontSize:10.5, fontWeight:700, color:C.muted, letterSpacing:"0.14em", whiteSpace:"nowrap" }}>PENDING REQUESTS</span>
           <div style={{ flex:1, height:1, background:C.border }}/>
         </div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(320px, 1fr))", gap:15 }}>
