@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useSession } from "../context/SessionContext.jsx";
-import { getCases, runCase, getCaseStatus, getEvidencePackage, getBandMessages } from "../api/client.js";
+import { getCases, runCase, getCaseStatus, getBandMessages } from "../api/client.js";
 
 const C = {
   bg:"#050D1A", navy:"#0A1A2F", navyLight:"#0F2340", border:"#1A3A5C",
@@ -18,17 +18,6 @@ const AGENTS = {
   tokenizer:    { name:"Asset Tokenizer",       icon:"🪙", color:C.purple },
   signer:       { name:"Consensus Signer",      icon:"🔐", color:C.red    },
   governance:   { name:"Governance & Audit",    icon:"📋", color:C.purple },
-};
-
-// Maps package agent_name → AGENTS key
-const AGENT_KEY_MAP = {
-  doc_auditor:        "doc",
-  kyc_guardian:       "kyc",
-  dynamic_compliance: "compliance",
-  stress_test:        "risk",
-  asset_tokenizer:    "tokenizer",
-  consensus_signer:   "signer",
-  governance_audit:   "governance",
 };
 
 // Maps real Band agent UUIDs → AGENTS keys
@@ -61,30 +50,15 @@ const TERMINAL_STATUSES = new Set([
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// Strip leading [PASS]/[FAIL]/🚨 headers and trailing *Model:* lines from LLM summaries
-function cleanSummary(text) {
-  if (!text) return "";
-  let t = text.replace(/\*\*/g, "").replace(/`/g, "");
-  const paras = t.split(/\n\n+/);
-  const first = (paras[0] || "").trim();
-  const isHeader = /^\[(?:PASS|FAIL|HALT)\]/.test(first) || /^🚨/.test(first);
-  const last = (paras[paras.length - 1] || "").trim();
-  const isModelLine = /^[\*]?Model:/.test(last);
-  const start = isHeader ? 1 : 0;
-  const end = isModelLine ? paras.length - 1 : paras.length;
-  return paras.slice(start, end).join("\n\n").trim();
-}
-
-// Resolve @[[uuid]] mention syntax → @Handle using metadata.mentions or UUID_TO_AGENT fallback
+// Resolve @[[uuid]] mention syntax → @Name using metadata.mentions or UUID_TO_AGENT fallback.
+// This is the ONLY text transformation applied to raw Band messages.
 function resolveMentions(content, mentions) {
   const map = {};
   for (const m of (mentions || [])) {
     if (m.id) {
-      const label = m.handle
-        ? m.handle.replace(/^@/, "").replace(/\s+/g, "_")
-        : m.name
-        ? m.name.replace(/\s+/g, "_")
-        : null;
+      // Prefer m.name (clean display name e.g. "Orchestrator", "Doc Auditor") over
+      // m.handle which carries the full "user/agent-slug" prefix from Band.
+      const label = m.name ? m.name.replace(/\s+/g, "_") : null;
       if (label) map[m.id] = label;
     }
   }
@@ -96,131 +70,29 @@ function resolveMentions(content, mentions) {
   });
 }
 
-// Convert a raw Band message to a display bubble — returns null to skip
+// Convert a raw Band message to a display bubble.
+// Drops: brightuity_terminal plumbing, unknown sender UUIDs, empty content.
+// Transforms: only @[[uuid]] mention resolution — everything else verbatim.
+// Optional verdict chip: scans raw content for verdict marker, no reformatting.
 function rawToBubble(raw) {
   const content = raw.content || "";
   if (content.includes("brightuity_terminal:")) return null;
   const agentKey = UUID_TO_AGENT[raw.sender_id];
   if (!agentKey) return null;
   const mentions = raw.metadata?.mentions || [];
-  const resolved = resolveMentions(content, mentions);
-  const text = resolved.replace(/\*\*/g, "").replace(/`/g, "").trim();
-  if (!text) return null;
-  return { from: agentKey, text, delay: 600, lat: null };
-}
+  const text = resolveMentions(content, mentions);
+  if (!text.trim()) return null;
 
-// Scan room messages for the orchestrator's "Stage 1 complete" coordination text
-function findStage1Message(roomMessages) {
-  for (const raw of (roomMessages || [])) {
-    const content = raw.content || "";
-    if (content.includes("Stage 1 complete")) {
-      const resolved = resolveMentions(content, raw.metadata?.mentions || []);
-      return resolved.replace(/\*\*/g, "").replace(/`/g, "").trim();
-    }
-  }
-  return null;
-}
+  // Light verdict chip detection — does not modify text
+  let verdict = null;
+  if (/— PASS\b/.test(content) || /\*\*PASS\*\*/.test(content))      verdict = { status: "pass", label: "PASS" };
+  else if (/— HALT\b/.test(content) || /\*\*HALT\*\*/.test(content)) verdict = { status: "halt", label: "HALT" };
+  else if (/— FAIL\b/.test(content) || /\*\*FAIL\*\*/.test(content)) verdict = { status: "fail", label: "FAIL" };
 
-// Build the full ordered 8-agent conversation from real package + room data
-function buildFullConversation(pkg, roomMessages) {
-  const agents  = pkg.agent_evidence  || [];
-  const seal    = pkg.consensus_seal  || {};
-  const explain = pkg.explainability  || {};
-  const cs      = pkg.case_summary    || {};
-  const meta    = pkg.package_metadata || {};
-  const gate    = pkg.governance_gate  || {};
+  // Timestamp: Band may include created_at in the raw item or its metadata
+  const ts = raw.timestamp || raw.created_at || raw.metadata?.created_at || null;
 
-  // Index by agent_name for O(1) lookup
-  const byName = {};
-  for (const a of agents) byName[a.agent_name] = a;
-
-  // Format asset value
-  const eur = cs.asset_value_eur || 0;
-  const val = eur >= 1e6 ? `€${(eur / 1e6).toFixed(1)}M`
-            : eur >= 1e3 ? `€${(eur / 1e3).toFixed(0)}K`
-            : `€${eur}`;
-
-  const msgs = [];
-
-  // 1. Orchestrator — opening coordination
-  msgs.push({
-    from:  "orchestrator",
-    text:  `Case ${cs.request_id || ""} — ${cs.asset_type || ""} ${val}. Coordinating multi-agent review across the division's mandatory gates. @Doc_Auditor begin documentation review.`,
-    delay: 700,
-    lat:   null,
-  });
-
-  // 2–5. Doc Auditor → KYC → Compliance → Stress-Test (in pipeline order)
-  for (const agentName of ["doc_auditor", "kyc_guardian", "dynamic_compliance", "stress_test"]) {
-    const agent = byName[agentName];
-    if (!agent) continue;
-    const key = AGENT_KEY_MAP[agentName];
-    if (!key) continue;
-    msgs.push({
-      from:    key,
-      text:    cleanSummary(agent.summary) || agent.summary || "(no summary available)",
-      delay:   agent.latency_ms > 0 ? Math.min(agent.latency_ms, 1700) : 1000,
-      lat:     agent.latency_ms > 0 ? parseFloat((agent.latency_ms / 1000).toFixed(1)) : null,
-      verdict: {
-        status: agent.verdict,
-        label:  agent.verdict === "pass" ? "PASS" : agent.verdict === "halt" ? "HALT" : "FAIL",
-      },
-    });
-  }
-
-  // 6. Orchestrator — Stage 1 gate coordination (real room msg preferred, synthesized fallback)
-  const stage1 = findStage1Message(roomMessages)
-    || `Stage 1 complete — all verdicts received. Gate: ${(gate.gate_outcome || "PASS").toUpperCase()}. ${gate.gate_reason || ""}`.trim();
-  msgs.push({ from: "orchestrator", text: stage1, delay: 800, lat: null });
-
-  // 7. Asset Tokenizer (absent in halted cases — only render if present in agent_evidence)
-  const tok = byName["asset_tokenizer"];
-  if (tok) {
-    msgs.push({
-      from:    "tokenizer",
-      text:    cleanSummary(tok.summary) || tok.summary || "(no summary available)",
-      delay:   tok.latency_ms > 0 ? Math.min(tok.latency_ms, 1700) : 1000,
-      lat:     tok.latency_ms > 0 ? parseFloat((tok.latency_ms / 1000).toFixed(1)) : null,
-      verdict: {
-        status: tok.verdict,
-        label:  tok.verdict === "pass" ? "PASS" : tok.verdict === "halt" ? "HALT" : "FAIL",
-      },
-    });
-  }
-
-  // 8. Consensus Signer — from consensus_seal
-  const isSealed  = seal.status === "sealed";
-  const sigText   = isSealed
-    ? `SEALED ${cs.request_id || ""}\nHash: ${seal.canonical_hash || ""}\nSignature: ${(seal.signature || "").slice(0, 40)}…\nCurve: ${seal.curve || ""}\nGates cleared: ${(seal.gates_cleared || []).join(", ")}`
-    : `Seal BLOCKED — gate ${seal.failed_gate || "unknown"} failed. No token issued.`;
-  const sigChip   = isSealed
-    ? `SEALED · ${(seal.canonical_hash || "").slice(0, 22)}…`
-    : `HALTED · gate: ${seal.failed_gate || "unknown"}`;
-  msgs.push({ from: "signer", text: sigText, delay: 1000, lat: null, sealChip: sigChip });
-
-  // 9. Governance & Audit — from package_metadata + governance_gate
-  const govText = `Evidence package assembled — ${meta.package_id || ""}. Gate outcome: ${(gate.gate_outcome || "").toUpperCase()}. ${gate.gate_reason || ""} Classification: ${meta.classification || ""}. Decision record ready for the Head of Digital Assets.`
-    .replace(/\s+/g, " ").trim();
-  msgs.push({ from: "governance", text: govText, delay: 900, lat: null });
-
-  // 10. Orchestrator — final recommendation + seal chip
-  const isHalted      = gate.gate_outcome === "halt";
-  const finalSealChip = seal.status === "sealed"
-    ? `SEALED · ${(seal.canonical_hash || "").slice(0, 22)}…`
-    : seal.status === "blocked"
-    ? `HALTED · gate: ${seal.failed_gate || "unknown"}`
-    : null;
-  msgs.push({
-    from:    "orchestrator",
-    text:    explain.recommendation || explain.headline || "Analysis complete. Handing to Head of Digital Assets for final decision.",
-    delay:   1100,
-    lat:     null,
-    final:   true,
-    halted:  isHalted,
-    sealChip: finalSealChip,
-  });
-
-  return msgs;
+  return { from: agentKey, text, verdict, ts };
 }
 
 // ── UI components ──────────────────────────────────────────────────────────────
@@ -252,32 +124,29 @@ function highlight(text) {
 function Bubble({ m }) {
   const a = AGENTS[m.from];
   if (!a) return null;
-  const isPass    = m.verdict?.status === "pass";
-  const vColor    = isPass ? C.green : C.red;
-  const chipColor = m.sealChip?.startsWith("SEALED") ? C.cyan : C.red;
+  const isPass  = m.verdict?.status === "pass";
+  const vColor  = isPass ? C.green : C.red;
+  const tsLabel = m.ts
+    ? new Date(m.ts).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit", second:"2-digit" })
+    : null;
   return (
     <div style={{ display:"flex", gap:9, maxWidth:"82%" }}>
       <span style={{ width:30, height:30, borderRadius:"50%", background:`${a.color}22`, border:`1px solid ${a.color}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, flexShrink:0 }}>{a.icon}</span>
       <div style={{ minWidth:0 }}>
         <div style={{ display:"flex", alignItems:"baseline", gap:7, marginBottom:3 }}>
           <span style={{ fontSize:10.5, fontWeight:800, color:a.color }}>{a.name}</span>
-          {m.lat != null && <span style={{ fontSize:8, color:C.muted }}>{m.lat}s</span>}
+          {tsLabel && <span style={{ fontSize:8, color:C.muted }}>{tsLabel}</span>}
         </div>
-        <div style={{ background:C.navyLight, border:`1px solid ${m.final ? (m.halted ? C.red : C.gold)+"66" : C.border}`, borderRadius:"3px 12px 12px 12px", padding:"9px 12px", fontSize:11.5, lineHeight:1.5, color:C.white, whiteSpace:"pre-wrap" }}>
+        <div style={{ background:C.navyLight, border:`1px solid ${C.border}`, borderRadius:"3px 12px 12px 12px", padding:"9px 12px", fontSize:11.5, lineHeight:1.5, color:C.white, whiteSpace:"pre-wrap" }}>
           {highlight(m.text)}
         </div>
-        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:6 }}>
-          {m.verdict && (
+        {m.verdict && (
+          <div style={{ marginTop:6 }}>
             <span style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:9, fontWeight:700, color:vColor, background:`${vColor}1A`, border:`1px solid ${vColor}44`, padding:"3px 10px", borderRadius:20 }}>
               {isPass ? "✓" : "✕"} {m.verdict.label}
             </span>
-          )}
-          {m.sealChip && (
-            <span style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:9, fontWeight:700, color:chipColor, background:`${chipColor}1A`, border:`1px solid ${chipColor}44`, padding:"3px 10px", borderRadius:20 }}>
-              🔐 {m.sealChip}
-            </span>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -304,62 +173,63 @@ export default function BandRoom() {
   const { user } = useSession();
   const [searchParams] = useSearchParams();
 
-  const caseId        = id || "REQ-2041";
+  const caseId         = id || "REQ-2041";
   // Captured once at mount — intentionally NOT in effect deps to avoid re-run on URL strip
   const shouldRunFresh = searchParams.get("run") === "1";
 
   // Sidebar: real cases from API
   const [sidebarCases, setSidebarCases] = useState([]);
 
-  // Mirror state — phase: "loading" | "live" | "ready" | "idle" | "error"
-  const [phase,    setPhase]    = useState("loading");
-  const [pkg,      setPkg]      = useState(null);
-  const [messages, setMessages] = useState([]);   // full 8-agent conversation for animation tick
-  const [errorMsg, setErrorMsg] = useState(null);
+  // phase: "loading" | "live" | "done" | "idle" | "error"
+  const [phase,          setPhase]          = useState("loading");
+  const [terminalStatus, setTerminalStatus] = useState(null);
+  const [errorMsg,       setErrorMsg]       = useState(null);
 
-  // Animation / display state
+  // Feed state — raw bubbles accumulated in real time, never rebuilt
   const [shown,  setShown]  = useState([]);
   const [typing, setTyping] = useState(null);
   const [done,   setDone]   = useState(false);
-  const scrollRef   = useRef(null);
-  const roomMsgsRef = useRef([]);   // full Band room messages kept for buildFullConversation
+  const scrollRef = useRef(null);
 
-  // Load sidebar: pending cases + always include the currently-open case
-  useEffect(() => {
+  // Load sidebar: pending cases + always include the currently-open case.
+  // Extracted into a stable callback so it can run on mount AND when done flips.
+  const loadSidebar = useCallback(() => {
     getCases("pending").then(async pending => {
       const hasActive = pending.some(c => c.request_id === caseId);
-      if (hasActive) {
-        setSidebarCases(pending);
-        return;
-      }
-      // Current case is no longer pending (e.g. just processed) — fetch its status and prepend it
+      if (hasActive) { setSidebarCases(pending); return; }
+      // Active case no longer pending — fetch its current status and prepend it
       let activeEntry = { request_id: caseId, full_name: caseId, status: "awaiting_decision" };
       try {
         const st = await getCaseStatus(caseId);
-        activeEntry = { request_id: caseId, full_name: sidebarEntry?.full_name || caseId, status: st.status };
+        activeEntry = { request_id: caseId, full_name: caseId, status: st.status };
       } catch (_) {}
       setSidebarCases([activeEntry, ...pending]);
     }).catch(() => {});
   }, [caseId]);
 
+  // Load sidebar on mount and whenever caseId changes
+  useEffect(() => { loadSidebar(); }, [loadSidebar]);
+
+  // Re-load sidebar when the run completes so the dot updates from running→complete/halted
+  useEffect(() => { if (done) loadSidebar(); }, [done, loadSidebar]);
+
   // Derive display name from live cases
   const sidebarEntry = sidebarCases.find(c => c.request_id === caseId);
   const displayName  = sidebarEntry?.full_name ?? caseId;
 
-  // ── Live mirror + package enrichment ─────────────────────────────────────────
+  // ── Live mirror: raw Band room messages, in order, verbatim ──────────────────
   useEffect(() => {
     let cancelled = false;
     setPhase("loading");
     setShown([]);
-    setMessages([]);
     setTyping(null);
     setDone(false);
     setErrorMsg(null);
-    setPkg(null);
-    roomMsgsRef.current = [];
+    setTerminalStatus(null);
 
-    // Shared poll-and-enrich loop used by both paths
-    async function pollAndEnrich() {
+    // Poll getBandMessages every 3s. Feed = raw messages in arrival order.
+    // No package fetch, no reordering, no rebuilding.
+    async function pollRoom() {
       let seenCount  = 0;
       let isTerminal = false;
 
@@ -373,13 +243,12 @@ export default function BandRoom() {
         try {
           resp = await getBandMessages(caseId);
         } catch (_) {
-          continue; // network hiccup or transient 404 while room is being created
+          continue; // transient network error or room not yet created
         }
         if (cancelled) return;
         if (resp.status === "error") continue;
 
         const rawMsgs = resp.messages || [];
-        roomMsgsRef.current = rawMsgs;
         const newRaw  = rawMsgs.slice(seenCount);
         seenCount     = rawMsgs.length;
 
@@ -397,32 +266,29 @@ export default function BandRoom() {
           }
         }
 
-        if (isTerminal) break;
-
-        try {
-          const st = await getCaseStatus(caseId);
-          if (TERMINAL_STATUSES.has(st.status)) { isTerminal = true; break; }
-        } catch (_) {}
+        if (!isTerminal) {
+          try {
+            const st = await getCaseStatus(caseId);
+            if (TERMINAL_STATUSES.has(st.status)) {
+              if (!cancelled) setTerminalStatus(st.status);
+              isTerminal = true;
+            }
+          } catch (_) {}
+        }
       }
 
       if (cancelled) return;
       setTyping(null);
 
-      // Fetch package and build full 8-agent conversation
-      let p = null;
+      // Final status fetch for badge and headline
       try {
-        const raw = await getEvidencePackage(caseId);
-        if (raw?.package_metadata) p = raw;
+        const st = await getCaseStatus(caseId);
+        if (!cancelled) setTerminalStatus(st.status);
       } catch (_) {}
 
-      if (!p) { if (!cancelled) setDone(true); return; }
-
       if (!cancelled) {
-        setPkg(p);
-        setShown([]);
-        setTyping(null);
-        setMessages(buildFullConversation(p, roomMsgsRef.current));
-        setPhase("ready");
+        setDone(true);
+        setPhase("done");
       }
     }
 
@@ -446,7 +312,7 @@ export default function BandRoom() {
         }
 
         if (!cancelled) setPhase("live");
-        await pollAndEnrich();
+        await pollRoom();
 
       } else {
         // Plain view: show existing result only — do NOT auto-run
@@ -474,43 +340,15 @@ export default function BandRoom() {
           return;
         }
 
-        // Existing room with messages — show the sealed result
+        // Existing room with messages — mirror it
         if (!cancelled) setPhase("live");
-        await pollAndEnrich();
+        await pollRoom();
       }
     }
 
     loadMirror();
     return () => { cancelled = true; };
-  }, [caseId]); // shouldRunFresh intentionally omitted — captured at mount, URL is stripped immediately
-
-  // ── Animation tick — replays full 8-agent conversation from scratch ────────
-  useEffect(() => {
-    if (phase !== "ready" || messages.length === 0) return;
-    let cancelled = false;
-    setShown([]);     // always start clean — full conversation rebuilds here
-    setTyping(null);
-    setDone(false);
-    let i = 0;
-
-    const tick = () => {
-      if (cancelled) return;
-      if (i >= messages.length) { setTyping(null); setDone(true); return; }
-      const m = messages[i];
-      setTyping(m.from);
-      const wait = Math.min(m.delay || 900, 1700);
-      setTimeout(() => {
-        if (cancelled) return;
-        setTyping(null);
-        setShown(prev => [...prev, m]);
-        i++;
-        setTimeout(tick, 450);
-      }, wait);
-    };
-
-    const start = setTimeout(tick, 700);
-    return () => { cancelled = true; clearTimeout(start); };
-  }, [phase, messages]);
+  }, [caseId]); // shouldRunFresh intentionally omitted — captured at mount, URL stripped immediately
 
   // Auto-scroll
   useEffect(() => {
@@ -518,8 +356,7 @@ export default function BandRoom() {
   }, [shown, typing]);
 
   // Derived display values
-  const isHalted   = pkg?.governance_gate?.gate_outcome === "halt";
-  const headline   = pkg?.explainability?.headline || "";
+  const isHalted   = terminalStatus === "halted" || terminalStatus === "blocked_gate" || terminalStatus === "halted_kyc";
   const badgeColor = done ? (isHalted ? C.red : C.green) : C.amber;
   const badgeLabel = phase === "loading"
     ? "LOADING"
@@ -616,15 +453,15 @@ export default function BandRoom() {
             </div>
           )}
 
-          {/* Live mirror + enrichment (both phases share the same shown[] array) */}
-          {(phase === "live" || phase === "ready") && (
+          {/* Live mirror — raw Band room messages in order */}
+          {(phase === "live" || phase === "done") && (
             <>
               {shown.map((m, i) => <Bubble key={i} m={m}/>)}
               {typing && <Typing who={typing}/>}
               {done && (
                 <div style={{ textAlign:"center", marginTop:6 }}>
                   <span style={{ fontSize:8.5, color:isHalted ? C.red : C.green, background:`${isHalted ? C.red : C.green}1A`, border:`1px solid ${isHalted ? C.red : C.green}44`, padding:"4px 14px", borderRadius:20, fontWeight:700, letterSpacing:"0.5px" }}>
-                    {headline || (isHalted ? "ANALYSIS COMPLETE · RECOMMENDATION: HALT" : "ANALYSIS COMPLETE · RECOMMENDATION: APPROVE")}
+                    {isHalted ? "ANALYSIS COMPLETE · RECOMMENDATION: HALT" : "ANALYSIS COMPLETE · RECOMMENDATION: APPROVE"}
                   </span>
                 </div>
               )}

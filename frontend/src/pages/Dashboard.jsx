@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useSession } from "../context/SessionContext.jsx";
 import { getCases } from "../api/client.js";
 
@@ -185,19 +185,51 @@ function Dossier({ c, onClose, onProcess }) {
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, logout } = useSession();
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const initialLoad = useRef(true);
 
-  useEffect(() => {
+  // Fetches all cases and updates state. Only shows the loading spinner on the
+  // first call — subsequent background refreshes update silently.
+  const loadCases = useCallback(() => {
     getCases("all")
-      .then(raw => setCases(raw.map(mapCase)))
+      .then(raw => { setCases(raw.map(mapCase)); setError(null); })
       .catch(err => setError(err.message ?? "Fetch failed"))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (initialLoad.current) { setLoading(false); initialLoad.current = false; }
+      });
   }, []);
+
+  // Initial load on mount
+  useEffect(() => { loadCases(); }, [loadCases]);
+
+  // Re-fetch when the tab regains focus or becomes visible — returning from the
+  // room page shows fresh statuses and counts without a manual refresh
+  useEffect(() => {
+    const onFocus      = () => loadCases();
+    const onVisibility = () => { if (!document.hidden) loadCases(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [loadCases]);
+
+  // Re-fetch whenever react-router navigates TO the dashboard (SPA nav from room page
+  // does not trigger focus/visibilitychange, so location.key is the reliable signal)
+  useEffect(() => { loadCases(); }, [location.key, loadCases]);
+
+  // Light auto-refresh every 10 s while the dashboard is open
+  useEffect(() => {
+    const t = setInterval(loadCases, 10000);
+    return () => clearInterval(t);
+  }, [loadCases]);
 
   const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
   const firstName = user?.name?.split(" ")[0] ?? "Nevine";

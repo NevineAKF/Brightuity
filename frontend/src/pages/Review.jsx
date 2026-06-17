@@ -10,8 +10,6 @@ const C = {
   amber:"#FF9800", red:"#EF5350", purple:"#A78BFA", white:"#F0F4FF", muted:"#6B8CAE",
 };
 
-const ORDER = ["REQ-2041","REQ-2042","REQ-2043","REQ-2044","REQ-2045","REQ-2046"];
-
 const CASES = {
   "REQ-2041": {
     name:"Marcus Weber", flagCode:"DE", asset:"Commercial Real Estate", value:"€2.50M",
@@ -121,8 +119,6 @@ export default function Review() {
   const [signed, setSigned] = useState(false);
 
   const canSign = decision && reason.trim().length > 0;
-  const idx = ORDER.indexOf(caseId);
-  const nextId = ORDER[(idx + 1) % ORDER.length];
 
   const openReport = () => window.open(evidencePdfUrl(caseId), "_blank");
   const exportPdf  = () => window.open(evidencePdfUrl(caseId, true), "_blank");
@@ -145,7 +141,7 @@ export default function Review() {
           {data.recommendation==="DECLINE" && <span style={{ fontSize:8, fontWeight:700, color:C.red, background:`${C.red}1A`, border:`1px solid ${C.red}44`, padding:"2px 9px", borderRadius:20, whiteSpace:"nowrap", marginLeft:4 }}>● PIPELINE HALTED</span>}
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
-          <button onClick={()=>navigate(`/review/${nextId}`)} style={{ background:`${C.cyan}14`, border:`1px solid ${C.cyan}55`, borderRadius:7, padding:"6px 12px", color:C.cyan, fontSize:10, fontWeight:700, fontFamily:"inherit", cursor:"pointer", whiteSpace:"nowrap" }}>Next Case →</button>
+          <button onClick={() => navigate("/dashboard")} style={{ background:`${C.cyan}14`, border:`1px solid ${C.cyan}55`, borderRadius:7, padding:"6px 12px", color:C.cyan, fontSize:10, fontWeight:700, fontFamily:"inherit", cursor:"pointer", whiteSpace:"nowrap" }}>Next Case →</button>
           <button onClick={()=>{ logout(); navigate("/login"); }} style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:7, padding:"6px 12px", color:C.muted, fontSize:10, fontFamily:"inherit", cursor:"pointer", whiteSpace:"nowrap" }}>Log Out</button>
         </div>
       </div>
