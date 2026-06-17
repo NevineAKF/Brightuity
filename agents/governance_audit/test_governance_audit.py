@@ -320,8 +320,8 @@ def test_happy_path() -> dict:
     pm = pkg["package_metadata"]
     _check("package_id starts with EVP-REQ-2041",
            pm["package_id"].startswith("EVP-REQ-2041"), got=pm["package_id"][:25])
-    _check("institution is Meridian Digital Bank",
-           "Meridian Digital Bank" in pm["institution"], got=pm["institution"][:30])
+    _check("institution contains Digital Assets & Tokenization Division",
+           "Digital Assets & Tokenization Division" in pm["institution"], got=pm["institution"][:45])
     _check("schema_version = 1.0", pm["schema_version"] == "1.0", got=pm["schema_version"])
 
     # case_summary

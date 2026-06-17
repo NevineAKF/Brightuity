@@ -83,7 +83,7 @@ def _build_synthetic_package() -> dict[str, Any]:
         "package_metadata": {
             "package_id":      f"EVP-SYNTHETIC-LAYOUT-TEST-{ts}",
             "generated_at":    now,
-            "institution":     "Meridian Digital Bank -- Digital Assets & Tokenization Division",
+            "institution":     "Digital Assets & Tokenization Division",
             "classification":  "Confidential -- Internal Decision Record",
             "schema_version":  "1.0",
         },
@@ -288,7 +288,7 @@ def _build_synthetic_package() -> dict[str, Any]:
                 "verdict":      "pass",
                 "summary":      (
                     "Proposed ERC-3643 T-REX token structure: 2,500,000 tokens at €1.00 each. "
-                    "Transfer restricted to KYC-verified wallets on Meridian permissioned registry. "
+                    "Transfer restricted to KYC-verified wallets on the bank's permissioned registry. "
                     "12-month lock-up period post primary issuance. "
                     "Quarterly redemption windows with 90-day notice period."
                 ),
@@ -300,11 +300,11 @@ def _build_synthetic_package() -> dict[str, Any]:
                     "total_tokens":        2_500_000,
                     "value_per_token_eur": 1.0,
                     "structure_notes": [
-                        "Transfer restricted to KYC-verified wallets on Meridian permissioned registry",
+                        "Transfer restricted to KYC-verified wallets on the bank's permissioned registry",
                         "12-month lock-up post primary issuance",
                         "Quarterly redemption windows -- 90-day notice required",
                         "Governance: 67% supermajority required for structural changes",
-                        "Custodian: Meridian Digital Custody GmbH (BaFin-licensed)",
+                        "Custodian: the bank's digital custody entity (BaFin-licensed)",
                     ],
                 },
             },

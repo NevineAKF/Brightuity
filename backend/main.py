@@ -128,7 +128,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title="Brightuity API",
     description=(
-        "Zone 1 gateway — Meridian Digital Bank · Digital Assets & Tokenization Division. "
+        "Zone 1 gateway — Digital Assets & Tokenization Division. "
         "Serves client case data for the review pipeline. "
         "expected_outcome is never included in any response."
     ),

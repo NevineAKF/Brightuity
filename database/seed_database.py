@@ -299,7 +299,7 @@ for kind in profile_queue:
 # ----------------------------------------------------------------------------
 db = {
     "bank": {
-        "name": "Meridian Digital Bank",
+        "name": "Digital Assets & Tokenization Division",
         "type": "European digital bank (fictional — simulation)",
         "jurisdiction": "European Union",
         "regulatory_framework": "MiCA / AMLD5",

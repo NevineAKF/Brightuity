@@ -257,7 +257,7 @@ def assemble_evidence_package(
         package_metadata=PackageMetadata(
             package_id=package_id,
             generated_at=generated_at,
-            institution="Meridian Digital Bank — Digital Assets & Tokenization Division",
+            institution="Digital Assets & Tokenization Division",
             classification="Confidential — Internal Decision Record",
             schema_version="1.0",
         ),

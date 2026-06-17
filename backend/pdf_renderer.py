@@ -420,18 +420,11 @@ def _section_cover(pkg: dict, st: _Styles) -> list:
     human   = pkg.get("human_authorization")
 
     # Metadata
-    institution    = meta.get("institution", "Meridian Digital Bank")
+    institution    = meta.get("institution", "Digital Assets & Tokenization Division")
     classification = meta.get("classification", "Confidential — Internal Decision Record")
     package_id     = meta.get("package_id",   "EVP-UNKNOWN")
     generated_at   = meta.get("generated_at", "")
     schema_version = meta.get("schema_version", "")
-
-    # Split institution into name + division if separator present
-    parts     = institution.split(" — ", 1)
-    inst_name = parts[0].strip()
-    division  = parts[1].strip() if len(parts) > 1 else "Digital Assets &amp; Tokenization Division"
-    # Sanitise the division string for XML (re-escape after manual split)
-    division_xml = division.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     # Case summary fields
     request_id   = summary.get("request_id",  "")
@@ -462,8 +455,7 @@ def _section_cover(pkg: dict, st: _Styles) -> list:
 
     # Institution header band
     elements.append(_full_width_banner([
-        (_esc(inst_name), st["cover_institution"]),
-        (division_xml,    st["cover_division"]),
+        (_esc(institution), st["cover_institution"]),
     ], NAVY))
     elements.append(Spacer(1, 4))
 
