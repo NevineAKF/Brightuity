@@ -715,3 +715,64 @@ def verify_case(request_id: str) -> dict[str, Any]:
             else "SIGNATURE INVALID — package has been tampered with or is malformed."
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — Band room messages (live mirror)
+# ---------------------------------------------------------------------------
+
+@app.get(
+    "/cases/{request_id}/band-messages",
+    tags=["band"],
+    summary="Fetch the live messages of a case's Band coordination room",
+)
+def case_band_messages(request_id: str) -> dict[str, Any]:
+    """
+    Return the current messages of the Band room linked to this case.
+
+    Three possible outcomes (all return 200 so the frontend never hard-crashes
+    on a polling call — only a missing case row yields 404):
+
+      • No case row in DB → 404 {"detail": "case not found"}.
+      • band_chat_id is None/empty (room not created yet; case ran in-process
+        without Band, or hasn't been triggered) →
+        {"status": "no_room_yet", "messages": [], "chat_id": null}.
+      • band_chat_id present → calls Band context API.
+        On success → {"status": "ok", "messages": [...], "chat_id": "..."}.
+        On Band API error → {"status": "error", "messages": [], "error": "..."}
+        (error logged server-side; frontend receives an empty but valid envelope).
+    """
+    case = case_store.get_case(request_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+
+    chat_id: str | None = case.get("band_chat_id") or None
+
+    if not chat_id:
+        return {
+            "request_id": request_id,
+            "chat_id":    None,
+            "messages":   [],
+            "status":     "no_room_yet",
+        }
+
+    try:
+        messages = band_bridge.fetch_room_messages(chat_id)
+        return {
+            "request_id": request_id,
+            "chat_id":    chat_id,
+            "messages":   messages,
+            "status":     "ok",
+        }
+    except Exception as exc:
+        logger.error(
+            "band-messages fetch failed for %s (chat_id=%s): %s",
+            request_id, chat_id, exc, exc_info=True,
+        )
+        return {
+            "request_id": request_id,
+            "chat_id":    chat_id,
+            "messages":   [],
+            "status":     "error",
+            "error":      str(exc),
+        }

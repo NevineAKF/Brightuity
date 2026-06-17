@@ -135,6 +135,64 @@ def run_case_via_band(request_id: str) -> tuple[dict, list[dict]]:
         return _await_result(client, chat_id, request_id)
 
 
+def fetch_room_messages(chat_id: str) -> list[dict]:
+    """
+    Fetch the current messages of a Band room by chat_id.
+
+    Reuses _api_client() and _AGENT_BASE — no hardcoded URLs or keys.
+    Applies the same defensive response-shape handling as _await_result() so
+    all plausible Band context shapes are handled:
+      bare list → items = context_data
+      dict with messages/events/history/items/data keys → items extended from each
+
+    Returns a normalized list of message dicts:
+        { "sender_id", "message_type", "content", "metadata" }
+
+    Raises httpx.HTTPStatusError on a non-2xx Band API response.
+    Raises ValueError on an unparseable response body.
+    An empty room legitimately returns [].
+    """
+    with _api_client() as client:
+        url  = f"{_AGENT_BASE}/chats/{chat_id}/context"
+        resp = client.get(url)
+
+        if not resp.is_success:
+            logger.error(
+                "band_bridge: fetch_room_messages HTTP %s for chat_id=%s: %s",
+                resp.status_code, chat_id, resp.text[:200],
+            )
+            resp.raise_for_status()
+
+        try:
+            context_data = resp.json()
+        except Exception as exc:
+            raise ValueError(
+                f"band_bridge: fetch_room_messages — unparseable response for "
+                f"chat_id={chat_id}: {exc}"
+            ) from exc
+
+        # Normalise into a flat item list — same logic as _await_result()
+        items: list[Any] = []
+        if isinstance(context_data, list):
+            items = context_data
+        elif isinstance(context_data, dict):
+            for key in ("messages", "events", "history", "items", "data"):
+                val = context_data.get(key)
+                if isinstance(val, list):
+                    items.extend(val)
+
+        return [
+            {
+                "sender_id":    item.get("sender_id") or item.get("sender_name"),
+                "message_type": item.get("message_type"),
+                "content":      item.get("content") or item.get("text") or "",
+                "metadata":     item.get("metadata") or item.get("data") or {},
+            }
+            for item in items
+            if isinstance(item, dict)
+        ]
+
+
 # ── HTTP client ────────────────────────────────────────────────────────────────
 
 def _api_client() -> httpx.Client:
