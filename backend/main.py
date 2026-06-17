@@ -22,11 +22,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 
-from backend import band_bridge, case_state, case_store, authorization_signer, pii_store
+from backend import band_bridge, case_state, case_store, authorization_signer, pii_store, pdf_renderer
 from agents.orchestrator.orchestrator import run_pipeline
 from agents.governance_audit.logic import assemble_evidence_package
 
@@ -451,6 +451,69 @@ def case_package(request_id: str) -> dict[str, Any]:
             ),
         )
     return pkg
+
+
+@app.get(
+    "/cases/{request_id}/evidence.pdf",
+    tags=["pipeline"],
+    summary="Render and serve the Decision Evidence Package as a PDF",
+)
+def case_evidence_pdf(
+    request_id: str,
+    download: bool = Query(
+        default=False,
+        description=(
+            "Set true to force a file download (Content-Disposition: attachment). "
+            "Defaults to false — the browser renders the PDF inline."
+        ),
+    ),
+) -> Response:
+    """
+    Render the stored Decision Evidence Package as an A4 PDF and return it.
+
+    The PDF is generated on demand from the evidence package already written
+    by the pipeline. Returns 404 if no package exists for this case (pipeline
+    not yet complete, or the case ID is unknown). Returns 500 if the renderer
+    raises an unexpected error — the stack trace is logged server-side and
+    never exposed to the client.
+
+    Cache-Control is set to no-store because the package is mutated by the
+    human authorization step; a stale cached copy would omit the L2 seal.
+
+    Query params:
+      download (bool, default false): controls Content-Disposition.
+    """
+    pkg = case_store.get_evidence_package(request_id)
+    if pkg is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No evidence package found for {request_id}. "
+                "The case may not have completed processing."
+            ),
+        )
+    try:
+        pdf_bytes = pdf_renderer.render_evidence_package(pkg)
+    except Exception:
+        logger.exception("PDF render failed for %s", request_id)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to render evidence package PDF.",
+        )
+    filename = f"EVP-{request_id}.pdf"
+    disposition = (
+        f'attachment; filename="{filename}"'
+        if download
+        else f'inline; filename="{filename}"'
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": disposition,
+            "Cache-Control":       "no-store",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
