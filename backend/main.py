@@ -138,15 +138,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS: restrict to the frontend origin.
-# In production: replace with the deployed frontend URL and set allow_origins
-# from an environment variable. Do not use ["*"] in production.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5173",
+        "http://95.179.206.209",
+        "http://95.179.206.209:80",
+    ],
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
