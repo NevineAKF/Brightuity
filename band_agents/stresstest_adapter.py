@@ -15,7 +15,7 @@ When a user @-mentions the agent with a request_id (e.g. "REQ-2043"):
   1. Parses request_id (same regex as all other adapters).
   2. Looks up the client record (same loader).
   3. Calls run_stress_test() — the UNCHANGED engine function.
-  4. Posts a human-readable verdict via send_message(..., mentions=[sender])
+  4. Posts a human-readable verdict via send_message(..., mentions=_mention_targets)
      showing verdict, risk_score/risk_band, summary, and key risk_factors.
   5. Posts structured metadata via send_event() for downstream tooling.
 
@@ -135,13 +135,15 @@ class StressTestAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
 
         # Capture sender UUID for reply mentions — same pattern as all adapters.
         sender = msg.sender_id
+        _backend_id = os.getenv("BAND_BACKEND_AGENT_ID", "")
+        _mention_targets = [m for m in [sender, _backend_id] if m]
 
         match = _REQ_ID_RE.search(content)
         if not match:
             await tools.send_message(
                 "I need a **request_id** to run a stress-test. "
                 "Example: `@StressTest REQ-2041`",
-                mentions=[sender],
+                mentions=_mention_targets,
             )
             return
 
@@ -157,7 +159,7 @@ class StressTestAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                     await tools.send_message(
                         f"No client found for `{request_id}`. "
                         "Check the request_id and try again.",
-                        mentions=[sender],
+                        mentions=_mention_targets,
                     )
                     return
                 _pii_resp.raise_for_status()
@@ -167,7 +169,7 @@ class StressTestAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 await tools.send_message(
                     f"Stress-test failed for `{request_id}`: "
                     f"PII gateway unavailable — {exc}",
-                    mentions=[sender],
+                    mentions=_mention_targets,
                 )
                 return
         else:
@@ -176,7 +178,7 @@ class StressTestAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 await tools.send_message(
                     f"No client found for `{request_id}`. "
                     "Check the request_id and try again.",
-                    mentions=[sender],
+                    mentions=_mention_targets,
                 )
                 return
 
@@ -189,7 +191,7 @@ class StressTestAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             await tools.send_message(
                 f"Running stress-test for `{request_id}`… "
                 "(deterministic risk engine + DeepSeek narrative)",
-                mentions=[sender],
+                mentions=_mention_targets,
             )
 
             try:
@@ -198,12 +200,12 @@ class StressTestAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 logger.exception("run_stress_test failed for %s", request_id)
                 await tools.send_message(
                     f"Stress-test failed for `{request_id}`: {exc}",
-                    mentions=[sender],
+                    mentions=_mention_targets,
                 )
                 return
 
             reply = _format_reply(request_id, result)
-            await tools.send_message(reply, mentions=[sender])
+            await tools.send_message(reply, mentions=_mention_targets)
 
             rm = result.get("risk_metrics") or {}
             metadata: dict[str, Any] = {

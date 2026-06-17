@@ -9,7 +9,7 @@ When a user @-mentions the agent with a request_id (e.g. "REQ-2041"):
   1. Parses request_id from the message (same regex as KYC adapter).
   2. Looks up the client record from the local JSON dataset (same loader).
   3. Calls assess_compliance() — the UNCHANGED engine function.
-  4. Posts a human-readable verdict via send_message(..., mentions=[sender]).
+  4. Posts a human-readable verdict via send_message(..., mentions=_mention_targets).
   5. Posts structured metadata via send_event() for downstream tooling.
 
 PII guard: passport_number, DOB, address, and full_name are never posted.
@@ -129,6 +129,8 @@ class ComplianceAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
         # PlatformMessage carries sender_id (UUID); AgentTools._resolve_mentions()
         # resolves it via id_to_participant lookup — same pattern as kyc_adapter.
         sender = msg.sender_id
+        _backend_id = os.getenv("BAND_BACKEND_AGENT_ID", "")
+        _mention_targets = [m for m in [sender, _backend_id] if m]
 
         # Extract request_id (case-insensitive).
         match = _REQ_ID_RE.search(content)
@@ -136,7 +138,7 @@ class ComplianceAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             await tools.send_message(
                 "I need a **request_id** to run a compliance assessment. "
                 "Example: `@DynamicCompliance REQ-2041`",
-                mentions=[sender],
+                mentions=_mention_targets,
             )
             return
 
@@ -152,7 +154,7 @@ class ComplianceAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                     await tools.send_message(
                         f"No client found for `{request_id}`. "
                         "Check the request_id and try again.",
-                        mentions=[sender],
+                        mentions=_mention_targets,
                     )
                     return
                 _pii_resp.raise_for_status()
@@ -162,7 +164,7 @@ class ComplianceAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 await tools.send_message(
                     f"Compliance assessment failed for `{request_id}`: "
                     f"PII gateway unavailable — {exc}",
-                    mentions=[sender],
+                    mentions=_mention_targets,
                 )
                 return
         else:
@@ -171,7 +173,7 @@ class ComplianceAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 await tools.send_message(
                     f"No client found for `{request_id}`. "
                     "Check the request_id and try again.",
-                    mentions=[sender],
+                    mentions=_mention_targets,
                 )
                 return
 
@@ -184,7 +186,7 @@ class ComplianceAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             await tools.send_message(
                 f"Running compliance assessment for `{request_id}`… "
                 "(RAG retrieval + Gemini 2.5 Pro — may take a few seconds)",
-                mentions=[sender],
+                mentions=_mention_targets,
             )
 
             try:
@@ -193,13 +195,13 @@ class ComplianceAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 logger.exception("assess_compliance failed for %s", request_id)
                 await tools.send_message(
                     f"Compliance assessment failed for `{request_id}`: {exc}",
-                    mentions=[sender],
+                    mentions=_mention_targets,
                 )
                 return
 
             # Human-readable verdict.
             reply = _format_reply(request_id, result)
-            await tools.send_message(reply, mentions=[sender])
+            await tools.send_message(reply, mentions=_mention_targets)
 
             # Structured metadata for downstream tooling (no PII).
             metadata: dict[str, Any] = {

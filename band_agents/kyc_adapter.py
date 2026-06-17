@@ -132,6 +132,8 @@ class KycAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
         # AgentTools._resolve_mentions() resolves UUIDs via its id_to_participant
         # lookup, so passing the raw UUID is the correct approach here.
         sender = msg.sender_id
+        _backend_id = os.getenv("BAND_BACKEND_AGENT_ID", "")
+        _mention_targets = [m for m in [sender, _backend_id] if m]
 
         # Extract request_id from message (case-insensitive).
         match = _REQ_ID_RE.search(content)
@@ -139,7 +141,7 @@ class KycAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             await tools.send_message(
                 "I need a **request_id** to run KYC screening. "
                 "Example: `@KycGuardian REQ-2041`",
-                mentions=[sender],
+                mentions=_mention_targets,
             )
             return
 
@@ -155,7 +157,7 @@ class KycAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                     await tools.send_message(
                         f"No client found for `{request_id}`. "
                         "Check the request_id and try again.",
-                        mentions=[sender],
+                        mentions=_mention_targets,
                     )
                     return
                 _pii_resp.raise_for_status()
@@ -165,7 +167,7 @@ class KycAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 await tools.send_message(
                     f"KYC screening failed for `{request_id}`: "
                     f"PII gateway unavailable — {exc}",
-                    mentions=[sender],
+                    mentions=_mention_targets,
                 )
                 return
         else:
@@ -174,7 +176,7 @@ class KycAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 await tools.send_message(
                     f"No client found for `{request_id}`. "
                     "Check the request_id and try again.",
-                    mentions=[sender],
+                    mentions=_mention_targets,
                 )
                 return
 
@@ -186,7 +188,7 @@ class KycAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
         try:
             await tools.send_message(
                 f"Running KYC screening for `{request_id}`… (this may take a few seconds)",
-                mentions=[sender],
+                mentions=_mention_targets,
             )
 
             try:
@@ -195,13 +197,13 @@ class KycAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 logger.exception("screen_kyc failed for %s", request_id)
                 await tools.send_message(
                     f"KYC screening failed for `{request_id}`: {exc}",
-                    mentions=[sender],
+                    mentions=_mention_targets,
                 )
                 return
 
             # Human-readable verdict.
             reply = _format_reply(request_id, result)
-            await tools.send_message(reply, mentions=[sender])
+            await tools.send_message(reply, mentions=_mention_targets)
 
             # Structured metadata for downstream tooling (no PII).
             screening = result.get("screening_result") or {}

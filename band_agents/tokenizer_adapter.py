@@ -9,7 +9,7 @@ When a user @-mentions the agent with a request_id (e.g. "REQ-2041"):
   1. Parses request_id (same regex as all other adapters).
   2. Looks up the client record (same loader).
   3. Calls design_token_structure() — the UNCHANGED engine function.
-  4. Posts a human-readable proposal via send_message(..., mentions=[sender])
+  4. Posts a human-readable proposal via send_message(..., mentions=_mention_targets)
      showing the token standard, supply, per-token value, and structure notes.
   5. Posts structured metadata via send_event() for downstream tooling.
 
@@ -122,13 +122,15 @@ class AssetTokenizerAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
 
         # Capture sender UUID for reply mentions — same pattern as all adapters.
         sender = msg.sender_id
+        _backend_id = os.getenv("BAND_BACKEND_AGENT_ID", "")
+        _mention_targets = [m for m in [sender, _backend_id] if m]
 
         match = _REQ_ID_RE.search(content)
         if not match:
             await tools.send_message(
                 "I need a **request_id** to design a token structure. "
                 "Example: `@AssetTokenizer REQ-2041`",
-                mentions=[sender],
+                mentions=_mention_targets,
             )
             return
 
@@ -144,7 +146,7 @@ class AssetTokenizerAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                     await tools.send_message(
                         f"No client found for `{request_id}`. "
                         "Check the request_id and try again.",
-                        mentions=[sender],
+                        mentions=_mention_targets,
                     )
                     return
                 _pii_resp.raise_for_status()
@@ -154,7 +156,7 @@ class AssetTokenizerAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 await tools.send_message(
                     f"Token structure design failed for `{request_id}`: "
                     f"PII gateway unavailable — {exc}",
-                    mentions=[sender],
+                    mentions=_mention_targets,
                 )
                 return
         else:
@@ -163,7 +165,7 @@ class AssetTokenizerAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 await tools.send_message(
                     f"No client found for `{request_id}`. "
                     "Check the request_id and try again.",
-                    mentions=[sender],
+                    mentions=_mention_targets,
                 )
                 return
 
@@ -176,7 +178,7 @@ class AssetTokenizerAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
             await tools.send_message(
                 f"Designing token structure for `{request_id}`… "
                 "(GPT-4o structuring — may take a few seconds)",
-                mentions=[sender],
+                mentions=_mention_targets,
             )
 
             try:
@@ -185,12 +187,12 @@ class AssetTokenizerAdapter(SimpleAdapter[list]):  # type: ignore[type-arg]
                 logger.exception("design_token_structure failed for %s", request_id)
                 await tools.send_message(
                     f"Token structure design failed for `{request_id}`: {exc}",
-                    mentions=[sender],
+                    mentions=_mention_targets,
                 )
                 return
 
             reply = _format_reply(request_id, result)
-            await tools.send_message(reply, mentions=[sender])
+            await tools.send_message(reply, mentions=_mention_targets)
 
             metadata: dict[str, Any] = {
                 "agent":               "asset_tokenizer",
