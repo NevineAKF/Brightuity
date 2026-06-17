@@ -201,7 +201,7 @@ export default function Dashboard() {
 
   const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
   const firstName = user?.name?.split(" ")[0] ?? "Nevine";
-  const handleProcess = id => navigate(`/room/${id}`);
+  const handleProcess = id => navigate(`/room/${id}?run=1`);
 
   const pendingCases = cases.filter(c => c.status === "pending");
   const doneCnt = cases.filter(c => c.status === "approved" || c.status === "authorized" || c.status === "rejected").length;

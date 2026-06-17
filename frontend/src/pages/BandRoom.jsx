@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useSession } from "../context/SessionContext.jsx";
 import { getCases, runCase, getCaseStatus, getEvidencePackage, getBandMessages } from "../api/client.js";
 
@@ -302,31 +302,45 @@ export default function BandRoom() {
   const { id }   = useParams();
   const navigate = useNavigate();
   const { user } = useSession();
+  const [searchParams] = useSearchParams();
 
-  const caseId = id || "REQ-2041";
+  const caseId        = id || "REQ-2041";
+  // Captured once at mount — intentionally NOT in effect deps to avoid re-run on URL strip
+  const shouldRunFresh = searchParams.get("run") === "1";
 
   // Sidebar: real cases from API
   const [sidebarCases, setSidebarCases] = useState([]);
 
-  // Mirror state — phase: "loading" | "live" | "ready" | "error"
+  // Mirror state — phase: "loading" | "live" | "ready" | "idle" | "error"
   const [phase,    setPhase]    = useState("loading");
   const [pkg,      setPkg]      = useState(null);
-  const [messages, setMessages] = useState([]);   // enrichment messages fed to animation tick
+  const [messages, setMessages] = useState([]);   // full 8-agent conversation for animation tick
   const [errorMsg, setErrorMsg] = useState(null);
 
   // Animation / display state
   const [shown,  setShown]  = useState([]);
   const [typing, setTyping] = useState(null);
   const [done,   setDone]   = useState(false);
-  const scrollRef     = useRef(null);
-  const roomMsgsRef   = useRef([]);   // full Band room messages, kept for buildFullConversation
+  const scrollRef   = useRef(null);
+  const roomMsgsRef = useRef([]);   // full Band room messages kept for buildFullConversation
 
-  // Load sidebar once on mount
+  // Load sidebar: pending cases + always include the currently-open case
   useEffect(() => {
-    getCases("all")
-      .then(setSidebarCases)
-      .catch(() => {});
-  }, []);
+    getCases("pending").then(async pending => {
+      const hasActive = pending.some(c => c.request_id === caseId);
+      if (hasActive) {
+        setSidebarCases(pending);
+        return;
+      }
+      // Current case is no longer pending (e.g. just processed) — fetch its status and prepend it
+      let activeEntry = { request_id: caseId, full_name: caseId, status: "awaiting_decision" };
+      try {
+        const st = await getCaseStatus(caseId);
+        activeEntry = { request_id: caseId, full_name: sidebarEntry?.full_name || caseId, status: st.status };
+      } catch (_) {}
+      setSidebarCases([activeEntry, ...pending]);
+    }).catch(() => {});
+  }, [caseId]);
 
   // Derive display name from live cases
   const sidebarEntry = sidebarCases.find(c => c.request_id === caseId);
@@ -342,48 +356,14 @@ export default function BandRoom() {
     setDone(false);
     setErrorMsg(null);
     setPkg(null);
+    roomMsgsRef.current = [];
 
-    async function loadMirror() {
-      // 1. Check if a Band room exists yet.
-      // 404 = no DB row yet (case never run) — treat as no_room_yet and proceed to runCase.
-      // Any other non-network error (5xx, truly unreachable) → error out.
-      let firstResp = null;
-      try {
-        firstResp = await getBandMessages(caseId);
-      } catch (e) {
-        if (e.status === 404) {
-          firstResp = { status: "no_room_yet", messages: [] };
-        } else {
-          if (!cancelled) {
-            setErrorMsg("Backend unreachable: " + (e.message || "unknown error"));
-            setPhase("error");
-          }
-          return;
-        }
-      }
-
-      // 2. No room yet — trigger the pipeline (409 = already running/terminal, ignore)
-      if (firstResp.status === "no_room_yet" || !(firstResp.messages?.length)) {
-        try {
-          await runCase(caseId, { force: false });
-        } catch (e) {
-          if (e.status !== 409) {
-            if (!cancelled) {
-              setErrorMsg("Couldn't start the pipeline — " + (e.message || "unknown error"));
-              setPhase("error");
-            }
-            return;
-          }
-        }
-      }
-
-      // 3. Begin polling Band room (max 40 polls ≈ 2 min)
-      if (!cancelled) setPhase("live");
+    // Shared poll-and-enrich loop used by both paths
+    async function pollAndEnrich() {
       let seenCount  = 0;
       let isTerminal = false;
 
       for (let poll = 0; poll < 40 && !cancelled && !isTerminal; poll++) {
-        // Show orchestrator typing dot while waiting between polls
         if (!cancelled) setTyping("orchestrator");
         await sleep(poll === 0 ? 800 : 3000);
         if (cancelled) return;
@@ -393,17 +373,16 @@ export default function BandRoom() {
         try {
           resp = await getBandMessages(caseId);
         } catch (_) {
-          continue; // network hiccup — keep polling
+          continue; // network hiccup or transient 404 while room is being created
         }
         if (cancelled) return;
         if (resp.status === "error") continue;
 
-        const rawMsgs   = resp.messages || [];
-        roomMsgsRef.current = rawMsgs;        // keep full set for final conversation build
-        const newRaw    = rawMsgs.slice(seenCount);
-        seenCount       = rawMsgs.length;
+        const rawMsgs = resp.messages || [];
+        roomMsgsRef.current = rawMsgs;
+        const newRaw  = rawMsgs.slice(seenCount);
+        seenCount     = rawMsgs.length;
 
-        // Append new displayable bubbles, drop plumbing
         for (const raw of newRaw) {
           if (cancelled) return;
           if ((raw.content || "").includes("brightuity_terminal:")) {
@@ -420,44 +399,90 @@ export default function BandRoom() {
 
         if (isTerminal) break;
 
-        // Also gate on case lifecycle status
         try {
           const st = await getCaseStatus(caseId);
-          if (TERMINAL_STATUSES.has(st.status)) {
-            isTerminal = true;
-            break;
-          }
+          if (TERMINAL_STATUSES.has(st.status)) { isTerminal = true; break; }
         } catch (_) {}
       }
 
       if (cancelled) return;
       setTyping(null);
 
-      // 4. Fetch evidence package and enrich with real verdicts
+      // Fetch package and build full 8-agent conversation
       let p = null;
       try {
         const raw = await getEvidencePackage(caseId);
         if (raw?.package_metadata) p = raw;
       } catch (_) {}
 
-      if (!p) {
-        // No package available — mark complete without enrichment
-        if (!cancelled) setDone(true);
-        return;
-      }
+      if (!p) { if (!cancelled) setDone(true); return; }
 
       if (!cancelled) {
         setPkg(p);
-        setShown([]);     // clear live messages; tick will replay full 8-agent conversation
+        setShown([]);
         setTyping(null);
         setMessages(buildFullConversation(p, roomMsgsRef.current));
         setPhase("ready");
       }
     }
 
+    async function loadMirror() {
+      if (shouldRunFresh) {
+        // Strip ?run=1 from URL immediately so a page refresh won't re-trigger a fresh run
+        navigate(`/room/${caseId}`, { replace: true });
+
+        // Force a brand-new Band session
+        try {
+          await runCase(caseId, { force: true });
+        } catch (e) {
+          if (e.status !== 409) {
+            if (!cancelled) {
+              setErrorMsg("Couldn't start the pipeline — " + (e.message || "unknown error"));
+              setPhase("error");
+            }
+            return;
+          }
+          // 409 = already processing — proceed to poll
+        }
+
+        if (!cancelled) setPhase("live");
+        await pollAndEnrich();
+
+      } else {
+        // Plain view: show existing result only — do NOT auto-run
+        let firstResp = null;
+        try {
+          firstResp = await getBandMessages(caseId);
+        } catch (e) {
+          if (!cancelled) {
+            if (e.status === 404) {
+              setErrorMsg("Not yet processed — start it from the dashboard.");
+              setPhase("idle");
+            } else {
+              setErrorMsg("Backend unreachable: " + (e.message || "unknown error"));
+              setPhase("error");
+            }
+          }
+          return;
+        }
+
+        if (firstResp.status === "no_room_yet" || !(firstResp.messages?.length)) {
+          if (!cancelled) {
+            setErrorMsg("Not yet processed — start it from the dashboard.");
+            setPhase("idle");
+          }
+          return;
+        }
+
+        // Existing room with messages — show the sealed result
+        if (!cancelled) setPhase("live");
+        await pollAndEnrich();
+      }
+    }
+
     loadMirror();
     return () => { cancelled = true; };
-  }, [caseId]);
+  }, [caseId]); // shouldRunFresh intentionally omitted — captured at mount, URL is stripped immediately
 
   // ── Animation tick — replays full 8-agent conversation from scratch ────────
   useEffect(() => {
@@ -581,6 +606,13 @@ export default function BandRoom() {
           {phase === "error" && (
             <div style={{ textAlign:"center", padding:"48px 0", color:"#EF5350", fontSize:12 }}>
               {errorMsg || "Couldn't load the analysis — backend may still be processing."}
+            </div>
+          )}
+
+          {/* Idle state — case not yet processed, plain view */}
+          {phase === "idle" && (
+            <div style={{ textAlign:"center", padding:"48px 0", color:C.muted, fontSize:12 }}>
+              {errorMsg || "Not yet processed — start it from the dashboard."}
             </div>
           )}
 
