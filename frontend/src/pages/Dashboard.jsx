@@ -143,10 +143,11 @@ function CaseCard({ c, onReview, onProcess }) {
       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 16px 12px" }}>
         <Identicon seed={c.id} size={48} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
             <span style={{
               fontSize: 14, fontWeight: 700, color: C.white,
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              minWidth: 0,
             }}>
               {c.name}
             </span>
@@ -154,6 +155,7 @@ function CaseCard({ c, onReview, onProcess }) {
             <span style={{
               fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
               padding: "2px 7px", borderRadius: 10, flexShrink: 0,
+              marginLeft: "auto",
               background: p.bg, color: p.color, border: `1px solid ${p.border}`,
             }}>{c.priority}</span>
           </div>
@@ -166,13 +168,13 @@ function CaseCard({ c, onReview, onProcess }) {
       {/* Middle row: asset + value */}
       <div style={{
         display: "flex", justifyContent: "space-between", alignItems: "flex-start",
-        padding: "10px 16px",
+        padding: "10px 16px", gap: 10,
         borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`,
       }}>
-        <div style={{ minWidth: 0, paddingRight: 8 }}>
+        <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 9, color: C.muted, letterSpacing: "0.1em", marginBottom: 3 }}>ASSET TYPE</div>
-          <div style={{ fontSize: 12, fontWeight: 600, color: C.white }}>{c.asset}</div>
-          <div style={{ fontSize: 10.5, color: C.muted, marginTop: 2 }}>{c.detail}</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: C.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.asset}</div>
+          <div style={{ fontSize: 10.5, color: C.muted, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.detail}</div>
         </div>
         <div style={{ textAlign: "right", flexShrink: 0 }}>
           <div style={{ fontSize: 9, color: C.muted, letterSpacing: "0.1em", marginBottom: 3 }}>VALUE</div>
@@ -386,21 +388,24 @@ function DossierModal({ c, onClose, onProcess }) {
   );
 }
 
-/* ── CHANGE 4: Bell icon for navbar ──────────────────────────────────── */
-function BellIcon() {
+/* ── CHANGE 4: Bell pill with pending count ──────────────────────────── */
+function BellPill() {
+  const count = TOTAL - DONE;
   return (
-    <div style={{ position: "relative", cursor: "pointer", padding: "4px 6px" }}>
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-        stroke={C.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <div style={{
+      display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
+      padding: "5px 10px 5px 8px", borderRadius: 20,
+      background: `${C.gold}12`, border: `1px solid ${C.gold}33`,
+      cursor: "pointer",
+    }}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+        stroke={C.gold} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
         <path d="M13.73 21a2 2 0 0 1-3.46 0" />
       </svg>
-      {/* Gold unread dot */}
-      <div style={{
-        position: "absolute", top: 2, right: 4,
-        width: 8, height: 8, borderRadius: "50%",
-        background: C.gold, border: `1.5px solid ${C.bg}`,
-      }} />
+      <span style={{ fontSize: 10, fontWeight: 700, color: C.gold, whiteSpace: "nowrap" }}>
+        {count} pending
+      </span>
     </div>
   );
 }
@@ -432,39 +437,45 @@ function Navbar({ user, onLogout }) {
 
       <div style={{ flex: 1 }} />
 
-      {/* CHANGE 4: notification bell */}
-      <BellIcon />
+      {/* Right-side group: bell pill | name+avatar | sign-out — 18px gap between each */}
+      <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+        <BellPill />
 
-      {/* User info */}
-      {user && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: C.white }}>{user.name}</div>
-            <div style={{ fontSize: 9.5, color: C.muted }}>{user.role}</div>
-          </div>
-          <div style={{
-            width: 34, height: 34, borderRadius: "50%",
-            background: `linear-gradient(135deg, ${C.goldLight}, ${C.gold})`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 12, fontWeight: 800, color: C.navy, flexShrink: 0,
-          }}>
-            {user.name.split(" ").map(w => w[0]).join("")}
-          </div>
-          <button
-            onClick={onLogout}
-            style={{
-              background: "none", border: `1px solid ${C.border}`, borderRadius: 6,
-              padding: "5px 11px", color: C.muted, fontSize: 10,
-              fontFamily: "inherit", cursor: "pointer",
-              letterSpacing: "0.08em", transition: "all 0.2s",
-            }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = C.gold; e.currentTarget.style.color = C.gold; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.muted; }}
-          >
-            SIGN OUT
-          </button>
-        </div>
-      )}
+        {user && (
+          <>
+            {/* name + avatar in their own sub-group — text can never run into avatar */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: C.white, whiteSpace: "nowrap" }}>{user.name}</div>
+                <div style={{ fontSize: 9, color: C.muted, whiteSpace: "nowrap" }}>{user.role}</div>
+              </div>
+              <div style={{
+                width: 34, height: 34, borderRadius: "50%",
+                background: `linear-gradient(135deg, ${C.goldLight}, ${C.gold})`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 12, fontWeight: 800, color: C.navy, flexShrink: 0,
+              }}>
+                {user.name.split(" ").map(w => w[0]).join("")}
+              </div>
+            </div>
+
+            <button
+              onClick={onLogout}
+              style={{
+                background: "none", border: `1px solid ${C.border}`, borderRadius: 6,
+                padding: "5px 11px", color: C.muted, fontSize: 10,
+                fontFamily: "inherit", cursor: "pointer",
+                letterSpacing: "0.08em", transition: "all 0.2s",
+                whiteSpace: "nowrap", flexShrink: 0,
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = C.gold; e.currentTarget.style.color = C.gold; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.muted; }}
+            >
+              SIGN OUT
+            </button>
+          </>
+        )}
+      </div>
     </nav>
   );
 }
