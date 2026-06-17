@@ -1,567 +1,251 @@
-/**
- * Review.jsx — L4 Human Authorization layer.
- *
- * Three-panel layout:
- *   LEFT   — Band coordination chat (agent @mentions, audit proof of coordination)
- *   CENTER — 3D hexagonal token visual (CSS hex; Three.js replaces it in next step)
- *   RIGHT  — Six verdict cards with latency + Export PDF + Forward dropdown
- *   BOTTOM — Human decision zone (Approve/Reject + rationale + e-signature)
- *
- * Data is hardcoded for REQ-2041 (Marcus Weber, approve) and REQ-2043
- * (Viktor Petrov, PEP rejection). Real backend wiring is the next step.
- */
-import React, { useState, useEffect, useRef } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { useSession } from '../context/SessionContext.jsx'
-import { evidencePdfUrl } from '../api/client.js'
+import { useState, useEffect, useRef } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { useSession } from "../context/SessionContext.jsx";
+import { evidencePdfUrl } from "../api/client.js";
+import * as THREE from "three";
 
-/* ── Design tokens ──────────────────────────────────────────────────── */
-const NAVY       = '#0A1A2F'
-const NAVY_MID   = '#0F2340'
-const NAVY_PANEL = '#0C1D35'
-const BORDER     = '#1E3A5F'
-const GOLD       = '#E8A93D'
-const GOLD_DRK   = '#C4891A'
-const TEXT       = '#E2E8F0'
-const TEXT_DIM   = '#8BA3C1'
-const GREEN      = '#1B7F4B'
-const GREEN_LT   = '#34D399'
-const RED        = '#B3261E'
-const RED_LT     = '#F87171'
+const C = {
+  bg:"#050D1A", navy:"#0A1A2F", navyLight:"#0F2340", border:"#1A3A5C",
+  gold:"#E8A93D", goldLight:"#F0C75E", cyan:"#4FC3F7", green:"#4CAF50",
+  amber:"#FF9800", red:"#EF5350", purple:"#A78BFA", white:"#F0F4FF", muted:"#6B8CAE",
+};
 
-/* ── Hardcoded case data ─────────────────────────────────────────────── */
-const CASE_DATA = {
-  'REQ-2041': {
-    name: 'Marcus Weber', flag: '🇩🇪', nationality: 'German',
-    asset: 'Commercial Real Estate', detail: 'Grade A office, Frankfurt CBD — 2,400 m²',
-    value: '€2,500,000', tokens: '2,500,000 × ERC-3643 T-REX @ €1.00',
-    recommendation: 'APPROVE', rec_color: GREEN_LT, rec_bg: `${GREEN}20`,
-    photo: 'https://randomuser.me/api/portraits/men/42.jpg',
-    verdicts: [
-      { agent: 'Doc Auditor',           role: 'Document Verification',       verdict: 'pass',   summary: 'All documents verified. Deed, valuation, and registry filings complete. No issues found.',  latency: 3180, model: 'Qwen 3.6' },
-      { agent: 'KYC Guardian',          role: 'KYC & AML Compliance',        verdict: 'pass',   summary: 'No sanctions match. No PEP flags. Source of funds verified: documented business income.',    latency: 8420, model: 'Claude Opus 4.8' },
-      { agent: 'Dynamic Compliance',    role: 'Regulatory Analysis',         verdict: 'pass',   summary: 'Germany/MiCA Article 68 compliant. ERC-3643 permissible. No cross-border restrictions.',     latency: 12140, model: 'Gemini 3.1 Pro' },
-      { agent: 'Stress-Test Simulator', role: 'Market & Liquidity Risk',     verdict: 'pass',   summary: 'Risk score 28/100 (Low). Rate shock -8.2%: value maintained. Liquidity stress: adequate.',   latency: 6730, model: 'DeepSeek-V4-Pro' },
-      { agent: 'Asset Tokenizer',       role: 'Token Structuring',           verdict: 'pass',   summary: 'ERC-3643 T-REX: 2.5M tokens @ €1.00. 12-month lock-up. Quarterly redemption windows.',      latency: 7190, model: 'Kimi-K2.6' },
-      { agent: 'Consensus Signer',      role: 'Cryptographic Seal',          verdict: 'sealed', summary: 'All governance gates cleared. ECDSA-P256 canonical signature committed to audit record.',    latency: 38, model: 'Deterministic (no LLM)' },
+const ORDER = ["REQ-2041","REQ-2042","REQ-2043","REQ-2044","REQ-2045","REQ-2046"];
+
+const CASES = {
+  "REQ-2041": {
+    name:"Marcus Weber", flagCode:"DE", asset:"Commercial Real Estate", value:"€2.50M",
+    recommendation:"APPROVE", proof:"DGP-7F3A-2041",
+    report:[
+      { key:"doc",   icon:"📄", color:C.cyan,   name:"Doc Auditor",          status:"PASS",     text:"Title deed authentic, ownership confirmed, no liens. Value €2.5M confirmed against registry." },
+      { key:"kyc",   icon:"🛡️", color:C.green,  name:"KYC Guardian",         status:"PASS",     text:"Identity verified. No sanctions, no PEP flag. Source of funds legitimate. Risk: LOW." },
+      { key:"comp",  icon:"⚖️", color:C.gold,   name:"Dynamic Compliance",   status:"PASS",     text:"Compliant with MiCA Art. 4, AMLD5, BGB property law. No blockers. Sources cited." },
+      { key:"risk",  icon:"📈", color:C.amber,  name:"Stress-Test Simulator",status:"PASS",     text:"Fair value €2.5M ±3%. Risk score 24/100 (LOW). Stable under downturn scenarios." },
+      { key:"tok",   icon:"🪙", color:C.purple, name:"Asset Tokenizer",      status:"PASS",     text:"2,500 tokens @ €1,000. ERC-3643, KYC-gated transfers, governance encoded." },
+      { key:"sign",  icon:"🔐", color:C.red,    name:"Consensus Signer",     status:"SEALED",   text:"Consensus verified across all gates. Proof DGP-7F3A-2041 issued. Record sealed." },
+      { key:"gov",   icon:"📋", color:C.muted,  name:"Governance & Audit",   status:"ASSEMBLED",text:"All verdicts, proofs and audit trail bound into the Decision Evidence Package. Ready for authorization." },
     ],
-    chat: [
-      { agent: 'Orchestrator',        msg: '@Doc Auditor begin document review for case REQ-2041.' },
-      { agent: 'Doc Auditor',         msg: '@Orchestrator PASS — all documents verified. Encrypted ref: EVP-DOC-3F2A' },
-      { agent: 'Orchestrator',        msg: '@KYC Guardian proceed with identity and AML screening.' },
-      { agent: 'KYC Guardian',        msg: '@Orchestrator PASS — no sanctions, no PEP. Source of funds verified. Ref: EVP-KYC-7B4C' },
-      { agent: 'Orchestrator',        msg: '@Dynamic_Compliance map case to applicable jurisdiction and regulations.' },
-      { agent: 'Dynamic Compliance',  msg: '@Orchestrator PASS — Germany/MiCA Art. 68 compliant. ERC-3643 permitted. Ref: EVP-COMP-2D8E' },
-      { agent: 'Orchestrator',        msg: '@Stress_Test run fair-value and scenario analysis.' },
-      { agent: 'Stress-Test Simulator', msg: '@Orchestrator PASS — risk score 28/100. All stress scenarios within tolerance. Ref: EVP-RISK-5A1F' },
-      { agent: 'Orchestrator',        msg: '@Asset_Tokenizer design token structure.' },
-      { agent: 'Asset Tokenizer',     msg: '@Orchestrator PASS — ERC-3643 T-REX: 2.5M tokens @ €1.00. 12mo lock-up. Ref: EVP-TOK-3C9D' },
-      { agent: 'Consensus Signer',    msg: '@Orchestrator SEALED — all gates cleared. ECDSA: 3045...A9B2. Package: EVP-REQ-2041-20260613' },
-      { agent: 'Orchestrator',        msg: '@Head_of_Digital_Assets pipeline complete. Recommendation: APPROVE. Package sealed and ready for your review.' },
-    ],
+    orchestrator:"All eight agents reported; every mandatory gate cleared with no exceptions and the record is cryptographically sealed. I recommend APPROVE, subject to your authorization as Head of Digital Assets.",
   },
-  'REQ-2043': {
-    name: 'Viktor Petrov', flag: '🇧🇬', nationality: 'Bulgarian',
-    asset: 'Gold Reserve', detail: '1,200 troy oz verified bullion',
-    value: '€1,200,000', tokens: '—',
-    recommendation: 'HALT', rec_color: RED_LT, rec_bg: `${RED}20`,
-    photo: 'https://randomuser.me/api/portraits/men/77.jpg',
-    verdicts: [
-      { agent: 'Doc Auditor',           role: 'Document Verification',       verdict: 'pass',   summary: 'Custody certificates and provenance documents verified. Gold assay certificates valid.',      latency: 2940, model: 'Qwen 3.6' },
-      { agent: 'KYC Guardian',          role: 'KYC & AML Compliance',        verdict: 'halt',   summary: 'PEP STATUS CONFIRMED — Viktor Petrov matches EU sanctions list entry. Hard governance halt.', latency: 9810, model: 'Claude Opus 4.8' },
-      { agent: 'Dynamic Compliance',    role: 'Regulatory Analysis',         verdict: 'skipped', summary: 'Skipped — KYC hard halt prevents further pipeline execution.',                                latency: 0,    model: '—' },
-      { agent: 'Stress-Test Simulator', role: 'Market & Liquidity Risk',     verdict: 'skipped', summary: 'Skipped — KYC hard halt prevents further pipeline execution.',                                latency: 0,    model: '—' },
-      { agent: 'Asset Tokenizer',       role: 'Token Structuring',           verdict: 'skipped', summary: 'Skipped — KYC hard halt prevents further pipeline execution.',                                latency: 0,    model: '—' },
-      { agent: 'Consensus Signer',      role: 'Cryptographic Seal',          verdict: 'blocked', summary: 'Gate blocked — KYC mandatory gate not cleared. No token may be issued. Audit record sealed.', latency: 35,   model: 'Deterministic (no LLM)' },
+  "REQ-2043": {
+    name:"Viktor Petrov", flagCode:"BG", asset:"Gold Reserve", value:"€1.20M",
+    recommendation:"DECLINE", proof:"—",
+    report:[
+      { key:"doc", icon:"📄", color:C.cyan,  name:"Doc Auditor",   status:"PASS", text:"Assay certificate authentic, 1,200 troy oz confirmed, custody chain intact. Value €1.2M consistent with spot price." },
+      { key:"kyc", icon:"🛡️", color:C.red,   name:"KYC Guardian",  status:"FAIL", text:"⚠️ PEP match confirmed. Subject linked to politically exposed network. Source of funds: unverifiable offshore structures. Risk: CRITICAL." },
+      { key:"gov", icon:"📋", color:C.muted, name:"Governance & Audit", status:"HALTED", text:"KYC failure is a hard stop. Pipeline halted — Compliance, Risk and Tokenization did not execute. Halt recorded in audit trail." },
     ],
-    chat: [
-      { agent: 'Orchestrator',     msg: '@Doc Auditor begin document review for case REQ-2043.' },
-      { agent: 'Doc Auditor',      msg: '@Orchestrator PASS — documents verified. Ref: EVP-DOC-2C8F' },
-      { agent: 'Orchestrator',     msg: '@KYC Guardian proceed with identity and AML screening.' },
-      { agent: 'KYC Guardian',     msg: '@Orchestrator HALT — PEP match confirmed. Viktor Petrov appears on EU Regulation 2022/328 consolidated sanctions list. Hard halt invoked. No further agents may proceed. Ref: EVP-KYC-HALT-REQ-2043' },
-      { agent: 'Orchestrator',     msg: '@Head_of_Digital_Assets GOVERNANCE HALT — mandatory KYC gate failed. Pipeline stopped. Case REQ-2043 requires compliance investigation before any review can proceed.' },
-      { agent: 'Consensus Signer', msg: '@Orchestrator GATE BLOCKED — KYC gate not cleared. Token issuance BLOCKED. Audit record of halt committed with ECDSA signature.' },
-    ],
+    orchestrator:"Governance gate triggered: a KYC failure is a hard stop. The pipeline was halted and downstream agents did not execute. I recommend DECLINE, subject to your authorization as Head of Digital Assets.",
   },
-}
+};
 
-/* ── Agent color mapping ─────────────────────────────────────────────── */
-const AGENT_COLORS = {
-  'Orchestrator':          GOLD,
-  'Doc Auditor':           '#60A5FA',
-  'KYC Guardian':          '#A78BFA',
-  'Dynamic Compliance':    '#34D399',
-  'Stress-Test Simulator': '#F97316',
-  'Asset Tokenizer':       '#22D3EE',
-  'Consensus Signer':      '#FDE68A',
-}
-
-/* ── Verdict chip ────────────────────────────────────────────────────── */
-function VerdictChip({ verdict }) {
-  const cfg = {
-    pass:    { label: 'PASS',    bg: `${GREEN}22`,   color: GREEN_LT, border: `${GREEN}55` },
-    halt:    { label: 'HALT',    bg: `${RED}22`,     color: RED_LT,   border: `${RED}55` },
-    blocked: { label: 'BLOCKED', bg: `${RED}18`,     color: RED_LT,   border: `${RED}44` },
-    sealed:  { label: 'SEALED',  bg: `${GOLD}18`,    color: GOLD,     border: `${GOLD}44` },
-    skipped: { label: 'SKIPPED', bg: `${BORDER}`,    color: TEXT_DIM, border: BORDER },
-  }
-  const c = cfg[verdict] ?? cfg.skipped
+function Identicon({ seed, size=36, rounded=9 }) {
+  let h=5381; for (let i=0;i<seed.length;i++) h=(((h<<5)+h)+seed.charCodeAt(i))|0; h=Math.abs(h);
+  const ACC=[C.cyan,C.gold,C.muted], accent=ACC[h%3], pad=6, n=5, cell=(size-pad*2)/n, filled=[];
+  for (let r=0;r<n;r++) for (let col=0;col<n;col++){ const m=col<3?col:4-col; if ((h>>(r*3+m))&1) filled.push({r,col}); }
   return (
-    <span style={{
-      fontSize: 9.5, fontWeight: 700, letterSpacing: '0.1em',
-      padding: '3px 8px', borderRadius: 4,
-      background: c.bg, color: c.color, border: `1px solid ${c.border}`,
-    }}>{c.label}</span>
-  )
+    <svg width={size} height={size} style={{ flexShrink:0 }}>
+      <rect width={size} height={size} rx={rounded} fill={C.navyLight} stroke={`${C.gold}55`}/>
+      {filled.map(({r,col})=> <rect key={`${r}-${col}`} x={pad+col*cell} y={pad+r*cell} width={cell-1} height={cell-1} rx={1.5} fill={accent} opacity={0.85}/>)}
+    </svg>
+  );
 }
 
-/* ── Verdict card ────────────────────────────────────────────────────── */
-function VerdictCard({ v, index }) {
-  const [expanded, setExpanded] = useState(false)
-  const isActive = v.verdict !== 'skipped'
-  const borderColor = v.verdict === 'pass' ? `${GREEN}50`
-    : v.verdict === 'halt'    ? `${RED}60`
-    : v.verdict === 'blocked' ? `${RED}50`
-    : v.verdict === 'sealed'  ? `${GOLD}50`
-    : BORDER
-
-  return (
-    <div
-      style={{
-        background: NAVY_PANEL, border: `1px solid ${borderColor}`, borderRadius: 10,
-        padding: '0.875rem', cursor: isActive ? 'pointer' : 'default',
-        transition: 'all 0.2s', animation: `slideUp 0.4s ease ${index * 0.06}s both`,
-        opacity: isActive ? 1 : 0.45,
-      }}
-      onClick={() => isActive && setExpanded(e => !e)}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: expanded ? 8 : 0 }}>
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: TEXT, marginBottom: 2 }}>{v.agent}</div>
-          <div style={{ fontSize: 9.5, color: TEXT_DIM }}>{v.role}</div>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-          <VerdictChip verdict={v.verdict} />
-          {v.latency > 0 && (
-            <span style={{ fontSize: 9, color: TEXT_DIM, fontFamily: "'JetBrains Mono',monospace" }}>
-              {v.latency >= 1000 ? (v.latency / 1000).toFixed(1) + 's' : v.latency + 'ms'}
-            </span>
-          )}
-        </div>
-      </div>
-      {expanded && (
-        <div style={{ marginTop: 8, borderTop: `1px solid ${BORDER}`, paddingTop: 8, animation: 'fadeIn 0.2s ease' }}>
-          <div style={{ fontSize: 11.5, color: TEXT_DIM, lineHeight: 1.55, marginBottom: 6 }}>{v.summary}</div>
-          <div style={{ fontSize: 9.5, color: TEXT_DIM }}>Model: <span style={{ color: TEXT }}>{v.model}</span></div>
-        </div>
-      )}
-    </div>
-  )
+function Token3D({ state }) {
+  const mountRef = useRef(null);
+  const stateRef = useRef(state);
+  useEffect(()=>{ stateRef.current = state; }, [state]);
+  useEffect(()=>{
+    const mount = mountRef.current; if (!mount) return;
+    const W = mount.clientWidth || 320, H = 210;
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(40, W/H, 0.1, 100); camera.position.set(0,0.5,5);
+    const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+    renderer.setSize(W,H); renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+    mount.appendChild(renderer.domElement);
+    const group = new THREE.Group(); scene.add(group);
+    const coinGeo = new THREE.CylinderGeometry(1.3,1.3,0.22,6);
+    const coinMat = new THREE.MeshStandardMaterial({ color:0x8a93a6, metalness:0.95, roughness:0.28 });
+    const coin = new THREE.Mesh(coinGeo, coinMat); coin.rotation.x = Math.PI/2; group.add(coin);
+    const emblemGeo = new THREE.CylinderGeometry(0.55,0.55,0.27,6);
+    const emblemMat = new THREE.MeshStandardMaterial({ color:0x4fc3f7, emissive:0x0d2c40, metalness:0.7, roughness:0.35 });
+    const emblem = new THREE.Mesh(emblemGeo, emblemMat); emblem.rotation.x = Math.PI/2; group.add(emblem);
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(coinGeo), new THREE.LineBasicMaterial({ color:0xe8a93d, transparent:true, opacity:0.55 }));
+    edges.rotation.x = Math.PI/2; group.add(edges);
+    const pCount=90, positions=new Float32Array(pCount*3);
+    for (let i=0;i<pCount;i++){ const a=Math.random()*Math.PI*2, r=1.9+Math.random()*1.3; positions[i*3]=Math.cos(a)*r; positions[i*3+1]=(Math.random()-0.5)*2.4; positions[i*3+2]=Math.sin(a)*r; }
+    const pGeo = new THREE.BufferGeometry(); pGeo.setAttribute("position", new THREE.BufferAttribute(positions,3));
+    const pMat = new THREE.PointsMaterial({ color:0xe8a93d, size:0.035, transparent:true, opacity:0.5 });
+    const particles = new THREE.Points(pGeo, pMat); scene.add(particles);
+    scene.add(new THREE.AmbientLight(0x223349,1.1));
+    const key = new THREE.DirectionalLight(0xffffff,1.1); key.position.set(3,4,5); scene.add(key);
+    const goldLight = new THREE.PointLight(0xe8a93d,1.5,12); goldLight.position.set(-3,1.5,3); scene.add(goldLight);
+    const cyanLight = new THREE.PointLight(0x4fc3f7,1.0,12); cyanLight.position.set(3,-2,2); scene.add(cyanLight);
+    let mx=0,my=0;
+    const onMove = e=>{ const r=mount.getBoundingClientRect(); mx=((e.clientX-r.left)/r.width-0.5)*2; my=((e.clientY-r.top)/r.height-0.5)*2; };
+    mount.addEventListener("mousemove", onMove);
+    const cTarget=new THREE.Color(), eTarget=new THREE.Color(); let t=0, raf;
+    const animate = ()=>{
+      raf = requestAnimationFrame(animate); t+=0.016; const s=stateRef.current;
+      const speed = s==="halted"?0.0015 : s==="done"?0.014 : 0.006;
+      group.rotation.y += speed; group.position.y = Math.sin(t*1.2)*0.12;
+      group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, my*0.28, 0.05);
+      group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, -mx*0.18, 0.05);
+      particles.rotation.y -= 0.0016;
+      cTarget.set(s==="done"?0xe8a93d : s==="halted"?0x6b2433 : 0x8a93a6); coinMat.color.lerp(cTarget,0.045);
+      eTarget.set(s==="done"?0x6e4408 : s==="halted"?0x33060f : 0x0e1c2a); coinMat.emissive.lerp(eTarget,0.045);
+      pMat.opacity = THREE.MathUtils.lerp(pMat.opacity, s==="done"?0.95 : s==="halted"?0.15 : 0.5, 0.04);
+      goldLight.intensity = THREE.MathUtils.lerp(goldLight.intensity, s==="done"?2.4:1.5, 0.04);
+      renderer.render(scene, camera);
+    };
+    animate();
+    const onResize = ()=>{ const w=mount.clientWidth||W; camera.aspect=w/H; camera.updateProjectionMatrix(); renderer.setSize(w,H); };
+    window.addEventListener("resize", onResize);
+    return ()=>{ cancelAnimationFrame(raf); mount.removeEventListener("mousemove", onMove); window.removeEventListener("resize", onResize); if (renderer.domElement.parentNode===mount) mount.removeChild(renderer.domElement); renderer.dispose(); coinGeo.dispose(); emblemGeo.dispose(); pGeo.dispose(); coinMat.dispose(); emblemMat.dispose(); pMat.dispose(); };
+  }, []);
+  return <div ref={mountRef} style={{ width:"100%", height:210, cursor:"grab" }} />;
 }
 
-/* ── CSS Hex token — placeholder for Three.js 3D token ─────────────── */
-function HexToken({ verdict }) {
-  const color = verdict === 'APPROVE' ? '#C9A227'
-    : verdict === 'HALT' ? '#8B1E1E'
-    : '#9AA3B2'
-  const glow = verdict === 'APPROVE' ? `0 0 40px ${GOLD}60, 0 0 80px ${GOLD}20`
-    : verdict === 'HALT' ? `0 0 40px ${RED}60`
-    : `0 0 20px #9AA3B222`
-  const label = verdict === 'APPROVE' ? 'APPROVED'
-    : verdict === 'HALT' ? 'HALTED'
-    : 'PROCESSING'
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem', padding: '1.5rem 0' }}>
-      {/* Hex shape */}
-      <div style={{ position: 'relative' }}>
-        <svg viewBox="0 0 200 230" width="160" height="184" style={{ filter: `drop-shadow(${glow.split(',')[0]})`, animation: verdict === 'APPROVE' ? 'goldGlow 2.5s ease-in-out infinite' : 'none' }}>
-          <defs>
-            <linearGradient id="hexGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor={color} stopOpacity="0.9" />
-              <stop offset="60%" stopColor={color} stopOpacity="0.6" />
-              <stop offset="100%" stopColor={color} stopOpacity="0.3" />
-            </linearGradient>
-            <linearGradient id="hexShine" x1="0%" y1="0%" x2="50%" y2="100%">
-              <stop offset="0%" stopColor="white" stopOpacity="0.15" />
-              <stop offset="100%" stopColor="white" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-          {/* Outer hex */}
-          <polygon points="100,10 182,55 182,175 100,220 18,175 18,55"
-            fill="url(#hexGrad)" stroke={color} strokeWidth="1.5" opacity="0.9" />
-          {/* Shine layer */}
-          <polygon points="100,10 182,55 182,175 100,220 18,175 18,55"
-            fill="url(#hexShine)" />
-          {/* Inner hex */}
-          <polygon points="100,40 160,75 160,155 100,190 40,155 40,75"
-            fill="none" stroke={color} strokeWidth="1" opacity="0.4" />
-          {/* B letter */}
-          <text x="100" y="128" textAnchor="middle" fill="white"
-            fontSize="52" fontWeight="800" fontFamily="Montserrat,sans-serif" opacity="0.95">B</text>
-          {/* Facet lines */}
-          <line x1="100" y1="10" x2="100" y2="40" stroke="white" strokeWidth="0.8" opacity="0.2" />
-          <line x1="182" y1="55" x2="160" y2="75" stroke="white" strokeWidth="0.8" opacity="0.2" />
-          <line x1="182" y1="175" x2="160" y2="155" stroke="white" strokeWidth="0.8" opacity="0.2" />
-        </svg>
-        {/* Spinning ring */}
-        <div style={{
-          position: 'absolute', inset: -16,
-          borderRadius: '50%',
-          border: `1px solid ${color}30`,
-          animation: 'spin 8s linear infinite',
-          pointerEvents: 'none',
-        }} />
-      </div>
-
-      {/* Status */}
-      <div style={{ textAlign: 'center' }}>
-        <div style={{
-          fontSize: 11, fontWeight: 700, letterSpacing: '0.18em',
-          color: color, marginBottom: 6,
-        }}>{label}</div>
-        <div style={{ fontSize: 10, color: TEXT_DIM }}>
-          {verdict === 'APPROVE' ? 'Token structure ready · All gates cleared'
-            : verdict === 'HALT'    ? 'Hard governance halt · KYC gate blocked'
-            : 'Three.js 3D token loads here in next step'}
-        </div>
-      </div>
-
-      {/* Placeholder note */}
-      <div style={{
-        fontSize: 9.5, color: TEXT_DIM, opacity: 0.4,
-        border: `1px dashed ${BORDER}`, borderRadius: 6, padding: '4px 10px',
-      }}>
-        CSS placeholder — Three.js 3D replaces this
-      </div>
-    </div>
-  )
-}
-
-/* ── Decision zone ───────────────────────────────────────────────────── */
-function DecisionZone({ caseId, data }) {
-  const [decision, setDecision]   = useState('')
-  const [rationale, setRationale] = useState('')
-  const [signature, setSignature] = useState('')
-  const [submitted, setSubmitted] = useState(false)
-  const [errMsg, setErrMsg]       = useState('')
-  const isHalt = data.recommendation === 'HALT'
-
-  function handleSubmit() {
-    if (!decision) { setErrMsg('Select a decision.'); return }
-    if (!rationale.trim()) { setErrMsg('Rationale is required.'); return }
-    if (!signature.trim()) { setErrMsg('E-signature is required.'); return }
-    setErrMsg('')
-    setSubmitted(true)
-    // Real POST /cases/:id/authorize comes in the data-wiring step
-  }
-
-  if (submitted) {
-    return (
-      <div style={{
-        padding: '1.5rem', borderRadius: 12, textAlign: 'center',
-        background: decision === 'approve' ? `${GREEN}18` : `${RED}18`,
-        border: `1px solid ${decision === 'approve' ? `${GREEN}55` : `${RED}55`}`,
-        animation: 'fadeIn 0.4s ease',
-      }}>
-        <div style={{ fontSize: 20, marginBottom: 8 }}>{decision === 'approve' ? '✅' : '🚫'}</div>
-        <div style={{ fontSize: 14, fontWeight: 700, color: TEXT, marginBottom: 4 }}>
-          Decision recorded: {decision === 'approve' ? 'APPROVED' : 'REJECTED'}
-        </div>
-        <div style={{ fontSize: 11.5, color: TEXT_DIM }}>
-          Signed by Nevine AKF · Layer 2 ECDSA seal will be applied on submission to server.
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      {/* Recommendation banner */}
-      <div style={{
-        padding: '0.875rem 1.25rem', borderRadius: 10,
-        background: data.rec_bg, border: `1px solid ${data.rec_color}44`,
-        display: 'flex', alignItems: 'center', gap: '0.875rem',
-      }}>
-        <div style={{ fontSize: 18 }}>{data.recommendation === 'APPROVE' ? '🤖' : '⚠️'}</div>
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: data.rec_color, letterSpacing: '0.1em' }}>
-            SYSTEM RECOMMENDATION: {data.recommendation}
-          </div>
-          <div style={{ fontSize: 11, color: TEXT_DIM, marginTop: 2 }}>
-            {data.recommendation === 'APPROVE'
-              ? 'All 5 compliance gates cleared. Token structure ready. Final decision is yours.'
-              : 'Hard governance halt — KYC mandatory gate blocked. Human override not permitted.'}
-          </div>
-        </div>
-      </div>
-
-      {!isHalt && (
-        <>
-          {/* Decision buttons */}
-          <div style={{ display: 'flex', gap: '0.75rem' }}>
-            {['approve', 'reject'].map(d => (
-              <button key={d}
-                onClick={() => setDecision(d)}
-                style={{
-                  flex: 1, padding: '0.75rem',
-                  borderRadius: 8, border: `2px solid ${decision === d
-                    ? (d === 'approve' ? GREEN : RED)
-                    : BORDER}`,
-                  background: decision === d
-                    ? (d === 'approve' ? `${GREEN}25` : `${RED}25`)
-                    : NAVY_PANEL,
-                  color: decision === d
-                    ? (d === 'approve' ? GREEN_LT : RED_LT)
-                    : TEXT_DIM,
-                  fontSize: 12, fontWeight: 700, letterSpacing: '0.12em',
-                  fontFamily: 'inherit', cursor: 'pointer', transition: 'all 0.2s',
-                }}
-              >
-                {d === 'approve' ? '✓ APPROVE' : '✗ REJECT'}
-              </button>
-            ))}
-          </div>
-
-          {/* Rationale */}
-          <div>
-            <label style={{ fontSize: 10.5, color: TEXT_DIM, letterSpacing: '0.1em', display: 'block', marginBottom: 5 }}>
-              RATIONALE (required)
-            </label>
-            <textarea
-              value={rationale}
-              onChange={e => setRationale(e.target.value)}
-              placeholder="Document your decision rationale for the audit record…"
-              rows={3}
-              style={{
-                width: '100%', background: NAVY, border: `1px solid ${BORDER}`, borderRadius: 8,
-                padding: '0.75rem', color: TEXT, fontSize: 12.5, fontFamily: 'inherit',
-                resize: 'vertical', outline: 'none',
-              }}
-              onFocus={e  => { e.target.style.borderColor = GOLD }}
-              onBlur={e   => { e.target.style.borderColor = BORDER }}
-            />
-          </div>
-
-          {/* E-signature */}
-          <div>
-            <label style={{ fontSize: 10.5, color: TEXT_DIM, letterSpacing: '0.1em', display: 'block', marginBottom: 5 }}>
-              E-SIGNATURE — type your full name to sign
-            </label>
-            <input
-              type="text"
-              value={signature}
-              onChange={e => setSignature(e.target.value)}
-              placeholder="Nevine AKF"
-              style={{
-                width: '100%', background: NAVY, border: `1px solid ${BORDER}`, borderRadius: 8,
-                padding: '0.75rem', color: TEXT, fontSize: 13, fontFamily: "'JetBrains Mono',monospace",
-                outline: 'none',
-              }}
-              onFocus={e  => { e.target.style.borderColor = GOLD }}
-              onBlur={e   => { e.target.style.borderColor = BORDER }}
-            />
-          </div>
-
-          {errMsg && <div style={{ fontSize: 11, color: RED_LT }}>{errMsg}</div>}
-
-          <button
-            onClick={handleSubmit}
-            style={{
-              background: `linear-gradient(135deg, ${GOLD} 0%, ${GOLD_DRK} 100%)`,
-              border: 'none', borderRadius: 8, padding: '0.875rem',
-              color: NAVY, fontSize: 12, fontWeight: 700, letterSpacing: '0.15em',
-              fontFamily: 'inherit', cursor: 'pointer',
-              boxShadow: `0 4px 20px ${GOLD}35`,
-            }}
-          >
-            SUBMIT DECISION & APPLY L2 SEAL
-          </button>
-        </>
-      )}
-    </div>
-  )
-}
-
-/* ── Review page ─────────────────────────────────────────────────────── */
 export default function Review() {
-  const { id }           = useParams()
-  const navigate         = useNavigate()
-  const { user, logout } = useSession()
-  const chatRef          = useRef(null)
-  const [chatVisible, setChatVisible] = useState([])
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { user, logout } = useSession();
+  const caseId = CASES[id] ? id : "REQ-2041";
+  const data = CASES[caseId];
+  const tokenState = data.recommendation === "APPROVE" ? "done" : "halted";
 
-  const data = CASE_DATA[id] ?? CASE_DATA['REQ-2041']
+  const [decision, setDecision] = useState(null);
+  const [notes, setNotes] = useState("");
+  const [reason, setReason] = useState("");
+  const [forward, setForward] = useState("");
+  const [signed, setSigned] = useState(false);
 
-  // Animate chat messages in sequence
-  useEffect(() => {
-    setChatVisible([])
-    data.chat.forEach((m, i) => {
-      setTimeout(() => {
-        setChatVisible(prev => [...prev, m])
-        if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight
-      }, i * 400)
-    })
-  }, [id])
+  const canSign = decision && reason.trim().length > 0;
+  const idx = ORDER.indexOf(caseId);
+  const nextId = ORDER[(idx + 1) % ORDER.length];
 
-  function handleLogout() {
-    logout()
-    navigate('/login')
-  }
+  const openReport = () => window.open(evidencePdfUrl(caseId), "_blank");
+  const exportPdf  = () => window.open(evidencePdfUrl(caseId, true), "_blank");
 
   return (
-    <div style={{ minHeight: '100vh', background: NAVY, fontFamily: "'Montserrat', sans-serif", display: 'flex', flexDirection: 'column' }}>
-      {/* Navbar */}
-      <nav style={{
-        height: 58, background: NAVY_MID, borderBottom: `1px solid ${BORDER}`,
-        display: 'flex', alignItems: 'center', paddingInline: '1.5rem', gap: '0.875rem',
-        position: 'sticky', top: 0, zIndex: 50, flexShrink: 0,
-      }}>
-        <svg width="24" height="24" viewBox="0 0 56 56" fill="none">
-          <polygon points="28,2 52,15 52,41 28,54 4,41 4,15" fill={GOLD} opacity="0.15" stroke={GOLD} strokeWidth="1.5" />
-          <text x="28" y="33" textAnchor="middle" fill={GOLD} fontSize="16" fontWeight="800" fontFamily="Montserrat,sans-serif">B</text>
-        </svg>
-        <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: '0.18em', color: TEXT }}>BRIGHTUITY</span>
-        <div style={{ width: 1, height: 20, background: BORDER }} />
-        <span style={{ fontSize: 10.5, color: TEXT_DIM }}>Decision Review</span>
-        <span style={{ fontSize: 10.5, color: GOLD, fontFamily: "'JetBrains Mono',monospace" }}>#{id}</span>
-        <div style={{ flex: 1 }} />
-        {/* PDF export link */}
-        <a
-          href={evidencePdfUrl(id, { download: true })}
-          target="_blank" rel="noreferrer"
-          style={{
-            background: 'none', border: `1px solid ${BORDER}`, borderRadius: 6,
-            padding: '4px 12px', color: TEXT_DIM, fontSize: 10, textDecoration: 'none',
-            letterSpacing: '0.08em', transition: 'all 0.2s',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = GOLD; e.currentTarget.style.color = GOLD }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.color = TEXT_DIM }}
-        >↓ EXPORT PDF</a>
-        <button onClick={() => navigate('/dashboard')}
-          style={{ background: 'none', border: `1px solid ${BORDER}`, borderRadius: 6, padding: '4px 10px', color: TEXT_DIM, fontSize: 10, fontFamily: 'inherit', cursor: 'pointer' }}>
-          ← QUEUE
-        </button>
-        {user && (
-          <button onClick={handleLogout}
-            style={{ background: 'none', border: `1px solid ${BORDER}`, borderRadius: 6, padding: '4px 10px', color: TEXT_DIM, fontSize: 10, fontFamily: 'inherit', cursor: 'pointer' }}>
-            SIGN OUT
-          </button>
-        )}
-      </nav>
-
-      {/* Three-panel layout */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
-
-        {/* LEFT — Band chat */}
-        <div style={{
-          width: 300, flexShrink: 0, background: NAVY_PANEL,
-          borderRight: `1px solid ${BORDER}`, display: 'flex', flexDirection: 'column',
-        }}>
-          <div style={{ padding: '1rem 1rem 0.75rem', borderBottom: `1px solid ${BORDER}` }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-              <div style={{ width: 7, height: 7, borderRadius: '50%', background: GREEN_LT, animation: 'pulse 1.5s infinite' }} />
-              <span style={{ fontSize: 10, color: TEXT_DIM, letterSpacing: '0.1em' }}>BAND COORDINATION · LIVE</span>
+    <div style={{ minHeight:"100vh", background:C.bg, fontFamily:"'Montserrat', system-ui, sans-serif", color:C.white }}>
+      <style>{`@keyframes sigReveal{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:translateX(0)}}`}</style>
+      {/* top bar */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, padding:"12px 22px", borderBottom:`1px solid ${C.border}`, background:C.navy, position:"sticky", top:0, zIndex:50 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:11, minWidth:0 }}>
+          <Identicon seed={caseId} size={36}/>
+          <div style={{ minWidth:0 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <span style={{ fontSize:14, fontWeight:800, whiteSpace:"nowrap" }}>{data.name}</span>
+              <span style={{ fontSize:9, color:C.muted, fontFamily:"monospace" }}>{caseId}</span>
             </div>
-            <div style={{ fontSize: 9.5, color: TEXT_DIM, opacity: 0.6 }}>
-              Proving cross-framework agent coordination
-            </div>
+            <div style={{ fontSize:8, color:C.green, marginTop:1 }}>● Biometric ID verified</div>
           </div>
-          <div ref={chatRef} style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
-            {chatVisible.map((m, i) => (
-              <div key={i} style={{ animation: 'chatEntry 0.3s ease' }}>
-                <div style={{ fontSize: 9.5, fontWeight: 700, color: AGENT_COLORS[m.agent] ?? TEXT_DIM, marginBottom: 3, letterSpacing: '0.04em' }}>
-                  @{m.agent}
-                </div>
-                <div style={{ fontSize: 11.5, color: TEXT, lineHeight: 1.5, background: NAVY_MID, borderRadius: 8, padding: '0.5rem 0.75rem', borderLeft: `2px solid ${AGENT_COLORS[m.agent] ?? BORDER}` }}>
-                  {m.msg}
-                </div>
-              </div>
-            ))}
+          {data.recommendation==="APPROVE" && <span style={{ fontSize:8, fontWeight:700, color:C.green, background:`${C.green}1A`, border:`1px solid ${C.green}44`, padding:"2px 9px", borderRadius:20, whiteSpace:"nowrap", marginLeft:4 }}>✓ SEALED · {data.proof}</span>}
+          {data.recommendation==="DECLINE" && <span style={{ fontSize:8, fontWeight:700, color:C.red, background:`${C.red}1A`, border:`1px solid ${C.red}44`, padding:"2px 9px", borderRadius:20, whiteSpace:"nowrap", marginLeft:4 }}>● PIPELINE HALTED</span>}
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+          <button onClick={()=>navigate(`/review/${nextId}`)} style={{ background:`${C.cyan}14`, border:`1px solid ${C.cyan}55`, borderRadius:7, padding:"6px 12px", color:C.cyan, fontSize:10, fontWeight:700, fontFamily:"inherit", cursor:"pointer", whiteSpace:"nowrap" }}>Next Case →</button>
+          <button onClick={()=>{ logout(); navigate("/login"); }} style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:7, padding:"6px 12px", color:C.muted, fontSize:10, fontFamily:"inherit", cursor:"pointer", whiteSpace:"nowrap" }}>Log Out</button>
+        </div>
+      </div>
+
+      <div style={{ display:"flex", maxWidth:1180, margin:"0 auto" }}>
+        {/* LEFT */}
+        <div style={{ flex:1.15, padding:20, borderRight:`1px solid ${C.border}`, minWidth:0 }}>
+          <div style={{ position:"relative", height:210, background:`radial-gradient(circle at 50% 50%, ${C.navyLight}55, ${C.bg})`, border:`1px solid ${C.border}`, borderRadius:14, overflow:"hidden" }}>
+            <Token3D state={tokenState}/>
+          </div>
+
+          <div style={{ marginTop:16, background:`linear-gradient(160deg, ${C.navy}, ${C.bg})`, border:`1px solid ${C.border}`, borderRadius:14, padding:15 }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:13 }}>
+              <span style={{ fontSize:12, fontWeight:700 }}>Compliance Report</span>
+              <span style={{ fontSize:9, color:data.recommendation==="APPROVE"?C.green:C.red, background:`${data.recommendation==="APPROVE"?C.green:C.red}1A`, border:`1px solid ${data.recommendation==="APPROVE"?C.green:C.red}44`, padding:"3px 9px", borderRadius:20, fontWeight:700 }}>{data.recommendation==="APPROVE"?"ALL GATES CLEARED":"GATE FAILURE — HALTED"}</span>
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:9 }}>
+              {data.report.map(r=>{
+                const sc = r.status==="FAIL"||r.status==="HALTED" ? C.red : C.green;
+                return (
+                  <div key={r.key} style={{ background:C.navyLight, border:`1px solid ${C.border}`, borderRadius:9, padding:"10px 12px" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+                      <span style={{ fontSize:12 }}>{r.icon}</span>
+                      <span style={{ fontSize:11, fontWeight:700, color:r.color }}>{r.name}</span>
+                      <span style={{ marginLeft:"auto", fontSize:8.5, color:sc, fontWeight:700 }}>{r.status}</span>
+                    </div>
+                    <div style={{ fontSize:10, color:"#B8C9DD", lineHeight:1.5 }}>{r.text}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ marginTop:13, padding:"12px 14px", background:`linear-gradient(135deg, ${C.gold}14, ${C.green}10)`, border:`1px solid ${C.gold}44`, borderRadius:10 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:6 }}><span style={{ fontSize:12 }}>🎯</span><span style={{ fontSize:9, color:C.gold, letterSpacing:"1px", fontWeight:700 }}>ORCHESTRATOR — RECOMMENDATION</span></div>
+              <div style={{ fontSize:10.5, color:C.white, lineHeight:1.55 }}>{data.orchestrator}</div>
+            </div>
+            <button onClick={openReport} style={{ width:"100%", marginTop:11, padding:11, background:`${C.gold}14`, border:`1px solid ${C.gold}55`, borderRadius:9, color:C.gold, fontSize:11, fontWeight:700, fontFamily:"inherit", cursor:"pointer" }}>📄 Open Full Report (PDF)</button>
           </div>
         </div>
 
-        {/* CENTER — Token visual + case summary */}
-        <div style={{
-          flex: 1, display: 'flex', flexDirection: 'column', background: NAVY,
-          borderRight: `1px solid ${BORDER}`, overflowY: 'auto',
-        }}>
-          {/* Case header */}
-          <div style={{ padding: '1.25rem 1.5rem', borderBottom: `1px solid ${BORDER}` }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              <img src={data.photo} width={44} height={44}
-                style={{ borderRadius: '50%', border: `2px solid ${BORDER}` }}
-                onError={e => { e.target.style.display = 'none' }} />
-              <div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: TEXT }}>{data.name}</div>
-                <div style={{ fontSize: 11, color: TEXT_DIM }}>{data.flag} {data.nationality} · {data.asset}</div>
-              </div>
-              <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-                <div style={{ fontSize: 18, fontWeight: 800, color: GOLD }}>{data.value}</div>
-                <div style={{ fontSize: 9.5, color: TEXT_DIM }}>Asset Value</div>
-              </div>
+        {/* RIGHT */}
+        <div style={{ flex:1, padding:20, minWidth:0, display:"flex", flexDirection:"column", gap:14 }}>
+          {signed ? (
+            <div style={{ background:`${C.green}12`, border:`1px solid ${C.green}55`, borderRadius:12, padding:"16px", textAlign:"center" }}>
+              <div style={{ fontSize:14, fontWeight:800, color:decision==="approve"?C.green:C.red }}>{decision==="approve"?"✓ APPROVED & SEALED":"✕ DECLINED & SEALED"}</div>
+              <div style={{ fontSize:9.5, color:C.muted, marginTop:5 }}>Authorized by {user?.name??"Nevine AKF"} · cryptographically-bound authorization record</div>
+            </div>
+          ) : (
+          <div>
+            <div style={{ fontSize:10, color:C.muted, marginBottom:7, fontWeight:600, letterSpacing:"0.5px" }}>YOUR DECISION</div>
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={()=>setDecision("approve")} style={{ flex:1, padding:14, background:decision==="approve"?`${C.green}26`:`${C.green}10`, border:`${decision==="approve"?1.5:1}px solid ${decision==="approve"?C.green:C.border}`, borderRadius:10, color:C.green, fontSize:13, fontWeight:800, fontFamily:"inherit", cursor:"pointer" }}>✓ APPROVE</button>
+              <button onClick={()=>setDecision("decline")} style={{ flex:1, padding:14, background:decision==="decline"?`${C.red}26`:"none", border:`${decision==="decline"?1.5:1}px solid ${decision==="decline"?C.red:C.border}`, borderRadius:10, color:C.red, fontSize:13, fontWeight:800, fontFamily:"inherit", cursor:"pointer" }}>✕ DECLINE</button>
             </div>
           </div>
-
-          {/* Hex token */}
-          <HexToken verdict={data.recommendation} />
-
-          {/* Token structure */}
-          {data.tokens !== '—' && (
-            <div style={{ padding: '0 1.5rem 1.5rem' }}>
-              <div style={{
-                background: NAVY_MID, border: `1px solid ${BORDER}`, borderRadius: 10, padding: '0.875rem',
-              }}>
-                <div style={{ fontSize: 10, color: TEXT_DIM, letterSpacing: '0.1em', marginBottom: 6 }}>TOKEN STRUCTURE</div>
-                <div style={{ fontSize: 12.5, color: TEXT, fontFamily: "'JetBrains Mono',monospace" }}>{data.tokens}</div>
-              </div>
-            </div>
           )}
-        </div>
 
-        {/* RIGHT — Verdict cards */}
-        <div style={{
-          width: 340, flexShrink: 0, background: NAVY_PANEL,
-          overflowY: 'auto', display: 'flex', flexDirection: 'column',
-        }}>
-          <div style={{ padding: '1rem 1rem 0.75rem', borderBottom: `1px solid ${BORDER}`, flexShrink: 0 }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, color: TEXT, letterSpacing: '0.1em', marginBottom: 2 }}>AGENT VERDICTS</div>
-            <div style={{ fontSize: 9.5, color: TEXT_DIM }}>Click a card to expand · {data.verdicts.filter(v => v.verdict !== 'skipped').length}/6 active</div>
-          </div>
-          <div style={{ flex: 1, padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.625rem', overflowY: 'auto' }}>
-            {data.verdicts.map((v, i) => <VerdictCard key={v.agent} v={v} index={i} />)}
+          <div>
+            <div style={{ fontSize:10, color:C.muted, marginBottom:6, fontWeight:600 }}>NOTES</div>
+            <textarea value={notes} onChange={e=>setNotes(e.target.value)} disabled={signed} placeholder="Add internal notes…" style={{ width:"100%", boxSizing:"border-box", background:C.navyLight, border:`1px solid ${C.border}`, borderRadius:9, padding:10, fontSize:11, color:C.white, fontFamily:"inherit", minHeight:42, resize:"vertical", outline:"none" }}/>
           </div>
 
-          {/* Forward dropdown */}
-          <div style={{ padding: '0.875rem', borderTop: `1px solid ${BORDER}`, flexShrink: 0 }}>
-            <div style={{ fontSize: 10, color: TEXT_DIM, letterSpacing: '0.08em', marginBottom: 6 }}>FORWARD PACKAGE TO</div>
-            <select style={{
-              width: '100%', background: NAVY, border: `1px solid ${BORDER}`, borderRadius: 7,
-              padding: '0.6rem 0.75rem', color: TEXT_DIM, fontSize: 11.5, fontFamily: 'inherit',
-              outline: 'none',
-            }}>
-              <option value="">Select department…</option>
-              <option>Legal & Compliance</option>
-              <option>Senior Management</option>
-              <option>Risk Committee</option>
-              <option>Regulatory Affairs</option>
+          <div>
+            <div style={{ fontSize:10, color:C.muted, marginBottom:6, fontWeight:600 }}>REASON FOR DECISION <span style={{ color:C.red }}>*</span></div>
+            <textarea value={reason} onChange={e=>setReason(e.target.value)} disabled={signed} placeholder="Required — why are you approving or declining?" style={{ width:"100%", boxSizing:"border-box", background:C.navyLight, border:`1px solid ${reason.trim()?C.border:C.red+"55"}`, borderRadius:9, padding:10, fontSize:11, color:C.white, fontFamily:"inherit", minHeight:50, resize:"vertical", outline:"none" }}/>
+          </div>
+
+          <div>
+            <div style={{ fontSize:10, color:C.muted, marginBottom:6, fontWeight:600 }}>AUTHORIZED SIGNATURE</div>
+            <div style={{ background:C.navyLight, border:`1px solid ${C.border}`, borderRadius:9, padding:12 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:9, marginBottom:10 }}>
+                <div style={{ width:30, height:30, borderRadius:"50%", background:`linear-gradient(135deg, ${C.goldLight}, ${C.gold})`, display:"flex", alignItems:"center", justifyContent:"center", color:C.navy, fontWeight:800, fontSize:10, flexShrink:0 }}>{(user?.name??"Nevine AKF").split(" ").map(w=>w[0]).join("")}</div>
+                <div style={{ flex:1, minWidth:0 }}><div style={{ fontSize:11.5, fontWeight:700 }}>{user?.name??"Nevine AKF"}</div><div style={{ fontSize:8.5, color:C.muted }}>{user?.role??"Head of Digital Assets"}</div></div>
+              </div>
+              <div style={{ background:C.bg, border:`1px dashed ${signed?C.green:C.gold}55`, borderRadius:8, padding:"10px 13px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
+                {signed
+                  ? <span style={{ fontSize:18, fontStyle:"italic", color:C.green, fontFamily:"Georgia, serif", animation:"sigReveal 0.6s ease-out both" }}>{user?.name??"Nevine AKF"}</span>
+                  : <span style={{ fontSize:13, fontStyle:"italic", color:C.muted, fontFamily:"Georgia, serif", opacity:0.45 }}>Signature appears on sign</span>}
+                {signed
+                  ? <span style={{ fontSize:9, color:C.green, fontWeight:700, whiteSpace:"nowrap", flexShrink:0 }}>● SIGNED & SEALED</span>
+                  : <button onClick={()=>canSign&&setSigned(true)} disabled={!canSign} style={{ background:canSign?`${C.gold}14`:C.navy, border:`1px solid ${canSign?C.gold+"55":C.border}`, borderRadius:7, padding:"6px 12px", color:canSign?C.gold:C.muted, fontSize:10, fontWeight:700, fontFamily:"inherit", cursor:canSign?"pointer":"not-allowed", whiteSpace:"nowrap", flexShrink:0 }}>Sign & Seal</button>}
+              </div>
+              {!canSign && !signed && <div style={{ fontSize:8.5, color:C.muted, marginTop:6 }}>Select a decision and enter a reason to enable signing.</div>}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize:10, color:C.muted, marginBottom:6, fontWeight:600 }}>FORWARD TO</div>
+            <select value={forward} onChange={e=>setForward(e.target.value)} style={{ width:"100%", boxSizing:"border-box", background:C.navyLight, border:`1px solid ${C.border}`, borderRadius:9, padding:"10px 13px", fontSize:11, color:forward?C.white:C.muted, fontFamily:"inherit", outline:"none", cursor:"pointer" }}>
+              <option value="">Select recipient…</option>
+              <option value="ceo">Chief Executive Officer</option>
+              <option value="legal">Legal Division</option>
+              <option value="risk">Risk &amp; Compliance Division</option>
+              <option value="ops">Operations Division</option>
+              <option value="other">Other Division</option>
             </select>
           </div>
-        </div>
-      </div>
 
-      {/* BOTTOM — Decision zone */}
-      <div style={{
-        background: NAVY_MID, borderTop: `1px solid ${BORDER}`,
-        padding: '1.25rem 1.5rem', flexShrink: 0,
-      }}>
-        <div style={{ maxWidth: 900, margin: '0 auto' }}>
-          <div style={{ fontSize: 11, color: TEXT_DIM, letterSpacing: '0.12em', marginBottom: '0.875rem' }}>
-            HUMAN AUTHORIZATION — LAYER 2
-          </div>
-          <DecisionZone caseId={id} data={data} />
+          <button onClick={exportPdf} style={{ padding:13, background:`linear-gradient(135deg, ${C.goldLight}, ${C.gold})`, border:"none", borderRadius:10, color:C.navy, fontSize:12, fontWeight:800, fontFamily:"inherit", cursor:"pointer", marginTop:2 }}>📄 Export PDF</button>
         </div>
       </div>
     </div>
-  )
+  );
 }

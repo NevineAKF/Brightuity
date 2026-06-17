@@ -203,7 +203,7 @@ export default function BandRoom(){
               <span style={{ fontSize:9, color:C.muted, fontFamily:"monospace" }}>{caseId}</span>
               <span style={{ fontSize:8, fontWeight:700, color:st.color, background:`${st.color}1A`, border:`1px solid ${st.color}44`, padding:"2px 8px", borderRadius:20, whiteSpace:"nowrap" }}>● {data.status==="halted"?"HALTED":done?"COMPLETE":"LIVE"}</span>
             </div>
-            <div style={{ fontSize:9.5, color:C.muted, marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{data.asset} · {data.value} · 7 agents coordinating through Band</div>
+            <div style={{ fontSize:9.5, color:C.muted, marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>Band Chat Room</div>
           </div>
         </div>
 
@@ -223,7 +223,7 @@ export default function BandRoom(){
         <div style={{ padding:"12px 18px", borderTop:`1px solid ${C.border}`, background:C.navy, display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
           <span style={{ fontSize:9.5, color:C.muted, display:"flex", alignItems:"center", gap:6, minWidth:0 }}>
             <span style={{ width:6, height:6, borderRadius:"50%", background:done?C.gold:C.green, flexShrink:0 }}/>
-            <span style={{ whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>You are observing — agents coordinate autonomously. No human input in this room.</span>
+            <span style={{ whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>Observing — agents coordinate autonomously</span>
           </span>
           <button onClick={()=>done&&navigate(`/review/${caseId}`)} disabled={!done} style={{ background:done?`linear-gradient(135deg, ${C.goldLight}, ${C.gold})`:C.navyLight, border:done?"none":`1px solid ${C.border}`, borderRadius:9, padding:"9px 16px", color:done?C.navy:C.muted, fontSize:11, fontWeight:800, fontFamily:"inherit", cursor:done?"pointer":"not-allowed", whiteSpace:"nowrap", flexShrink:0, transition:"all 0.3s" }}>Open Decision Evidence Package →</button>
         </div>
