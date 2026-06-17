@@ -1,14 +1,14 @@
 /**
  * api/client.js — single source of all backend calls.
  *
- * Base URL is read from VITE_API_BASE env var:
- *   .env.development  → http://95.179.206.209:8000   (Vultr live backend)
- *   .env.production   → (empty) same-origin via nginx proxy
+ * Base URL priority: VITE_API_BASE env var → "/api" in prod → IP in dev.
+ *   production build  → "/api"  (nginx proxies /api → backend)
+ *   local dev         → "http://95.179.206.209:8000"
  *
  * No page should call fetch() directly — import from here.
  */
 
-const BASE = import.meta.env.VITE_API_BASE ?? 'http://95.179.206.209:8000'
+const BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.PROD ? '/api' : 'http://95.179.206.209:8000')
 
 /**
  * Internal fetch wrapper. Throws an Error with `.status` on non-OK responses.

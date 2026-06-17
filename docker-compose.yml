@@ -335,6 +335,22 @@ services:
       timeout: 5s
       retries: 3
 
+  # ── Frontend ─ nginx + React SPA ──────────────────────────────────────────
+  # Serves the built React app and proxies /api/ → http://backend:8000/
+  # Must share the "edge" network with backend so the hostname resolves.
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.web
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - edge
+    restart: unless-stopped
+
 # ── Named volumes ─────────────────────────────────────────────────────────────
 volumes:
   pii_db_data:    # PostgreSQL data for db1_pii
