@@ -12,74 +12,92 @@ const GOLD_DRK  = '#C4891A'
 const TEXT      = '#E2E8F0'
 const TEXT_DIM  = '#8BA3C1'
 const ERR       = '#E05252'
+const CYAN      = '#4FC3F7'
 
-/* ── Hex logo ───────────────────────────────────────────────────────── */
-function HexLogo({ size = 52 }) {
+/* ── Hex logo with embedded padlock — unlocks on Sign In ────────────── */
+/*
+ * CHANGE 1: replaced the inner "B" text with a padlock motif.
+ * Viewbox upgraded to 64×64 to match the task's coordinate system.
+ * Shackle group translates up + rotates when unlocking=true.
+ * Keyhole group rotates 90° (key-turned effect) when unlocking=true.
+ * Both transitions use cubic-bezier(.34,1.56,.64,1) for a springy feel.
+ */
+function HexLogo({ size = 52, unlocking = false }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 56 56" fill="none">
-      <polygon points="28,2 52,15 52,41 28,54 4,41 4,15"
-        fill={GOLD} opacity="0.12" stroke={GOLD} strokeWidth="1.5" />
-      <polygon points="28,9 47,20 47,36 28,47 9,36 9,20"
-        fill={GOLD} opacity="0.07" />
-      <text x="28" y="33" textAnchor="middle"
-        fill={GOLD} fontSize="16" fontWeight="800"
-        fontFamily="Montserrat,sans-serif">B</text>
+    <svg width={size} height={size} viewBox="0 0 64 64" fill="none">
+      {/* Outer hexagon — gold outline, faint fill */}
+      <polygon
+        points="32,4 56,18 56,46 32,60 8,46 8,18"
+        fill={GOLD} opacity="0.12" stroke={GOLD} strokeWidth="1.5"
+      />
+      {/* Inner hexagon — subtler fill layer */}
+      <polygon
+        points="32,12 52,23 52,41 32,52 12,41 12,23"
+        fill={GOLD} opacity="0.07"
+      />
+
+      {/* ── Padlock motif ─────────────────────────────────── */}
+
+      {/* Shackle — arcs over the top, lifts + tilts on unlock */}
+      <g
+        style={{
+          transformOrigin: '32px 30px',
+          transform: unlocking
+            ? 'translateY(-9px) rotate(-12deg)'
+            : 'none',
+          transition: 'transform 0.7s cubic-bezier(.34,1.56,.64,1)',
+        }}
+      >
+        <path
+          d="M25 30 V25 A7 7 0 0 1 39 25 V30"
+          stroke={CYAN}
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.85"
+        />
+      </g>
+
+      {/* Lock body — gold-outlined rect */}
+      <rect
+        x="23" y="30" width="18" height="15" rx="3"
+        fill={NAVY} stroke={GOLD} strokeWidth="1.5"
+      />
+
+      {/* Keyhole — rotates 90° (key-turned) on unlock */}
+      <g
+        style={{
+          transformOrigin: '32px 36px',
+          transform: unlocking ? 'rotate(90deg)' : 'rotate(0deg)',
+          transition: 'transform 0.7s cubic-bezier(.34,1.56,.64,1)',
+        }}
+      >
+        <circle cx="32" cy="36" r="2.6" fill={GOLD} />
+        <rect x="30.7" y="36" width="2.6" height="5" rx="1.3" fill={GOLD} />
+      </g>
     </svg>
-  )
-}
-
-/* ── Vault lock SVG — shackle lifts when unlocking ─────────────────── */
-function VaultLock({ unlocking }) {
-  return (
-    <div style={{ width: 80, height: 88, margin: '0 auto 1.75rem', position: 'relative' }}>
-      <svg viewBox="0 0 80 88" fill="none" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
-        {/* Glow backdrop when unlocked */}
-        {unlocking && (
-          <ellipse cx="40" cy="64" rx="30" ry="12"
-            fill={GOLD} opacity="0.10"
-            style={{ animation: 'pulse 1s ease-in-out infinite' }} />
-        )}
-        {/* Lock body */}
-        <rect x="8" y="36" width="64" height="46" rx="8"
-          fill={NAVY_MID} stroke={unlocking ? GOLD : BORDER} strokeWidth="2"
-          style={{ transition: 'stroke 0.4s' }} />
-        {/* Keyhole circle */}
-        <circle cx="40" cy="56" r="9" fill={NAVY} stroke={GOLD} strokeWidth="1.5" />
-        {/* Keyhole slot */}
-        <rect x="37" y="57" width="6" height="13" rx="3"
-          fill={NAVY} stroke={GOLD} strokeWidth="1.5" />
-        {/* Shackle — animates up-and-left on unlock */}
-        <path d="M18 38 V22 A22 22 0 0 1 62 22 V38"
-          stroke={unlocking ? GOLD : TEXT_DIM} strokeWidth="6"
-          strokeLinecap="round" fill="none"
-          style={{
-            transition: 'transform 0.55s cubic-bezier(.34,1.56,.64,1), stroke 0.3s',
-            transform: unlocking ? 'translate(-4px, -18px) rotate(-8deg)' : 'none',
-            transformOrigin: '18px 38px',
-          }} />
-      </svg>
-    </div>
   )
 }
 
 /* ── Login page ─────────────────────────────────────────────────────── */
 export default function Login() {
-  const navigate      = useNavigate()
-  const { login }     = useSession()
-  const [pw, setPw]   = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
+  const navigate         = useNavigate()
+  const { login }        = useSession()
+  const [pw, setPw]      = useState('')
+  const [unlocking, setUnlocking] = useState(false)   /* CHANGE 1 + WIRE */
+  const [err, setErr]    = useState('')
 
   function handleSubmit(e) {
     e.preventDefault()
+    if (unlocking) return                              // guard against double-fire
     if (!pw.trim()) { setErr('Access code required.'); return }
     setErr('')
-    setBusy(true)
-    // Demo: any non-empty password unlocks after the animation
+    setUnlocking(true)
+    // Demo: any non-empty access code proceeds — no real auth in Phase 1
     setTimeout(() => {
       login('Nevine AKF', 'Head of Digital Assets')
       navigate('/dashboard')
-    }, 950)
+    }, 700)                                            // matches unlock animation
   }
 
   const inputBase = {
@@ -90,20 +108,25 @@ export default function Login() {
   }
 
   return (
+    /*
+     * CHANGE 2: outer container is now flexDirection:'column' so the tagline
+     * renders as a normal-flow sibling below the card — never overlaps.
+     */
     <div style={{
       minHeight: '100vh',
       background: `radial-gradient(ellipse at 55% 15%, #0D2B4A 0%, ${NAVY} 70%)`,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
       fontFamily: "'Montserrat', sans-serif", position: 'relative', overflow: 'hidden',
     }}>
-      {/* Subtle grid */}
+      {/* Subtle grid — absolutely positioned, behind everything */}
       <div style={{
         position: 'absolute', inset: 0, pointerEvents: 'none',
         backgroundImage: `linear-gradient(${BORDER}28 1px,transparent 1px),linear-gradient(90deg,${BORDER}28 1px,transparent 1px)`,
         backgroundSize: '64px 64px',
       }} />
 
-      {/* Corner accent */}
+      {/* Corner accent — absolutely positioned */}
       <div style={{
         position: 'absolute', top: 0, left: 0,
         width: 260, height: 260,
@@ -111,7 +134,7 @@ export default function Login() {
         pointerEvents: 'none',
       }} />
 
-      {/* Card */}
+      {/* Card — normal-flow flex child */}
       <div className="anim-slide-up" style={{
         position: 'relative', zIndex: 1,
         background: NAVY_MID, border: `1px solid ${BORDER}`,
@@ -125,9 +148,9 @@ export default function Login() {
           background: `linear-gradient(90deg,transparent,${GOLD},transparent)`, borderRadius: 2,
         }} />
 
-        {/* Logo + wordmark */}
+        {/* Logo + wordmark — HexLogo now receives the unlocking state */}
         <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
-          <HexLogo size={52} />
+          <HexLogo size={52} unlocking={unlocking} />
           <div style={{ marginTop: '0.6rem' }}>
             <div style={{ fontSize: 21, fontWeight: 800, letterSpacing: '0.22em', color: TEXT }}>BRIGHTUITY</div>
             <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: '0.18em', color: GOLD, marginTop: 5 }}>
@@ -135,8 +158,6 @@ export default function Login() {
             </div>
           </div>
         </div>
-
-        <VaultLock unlocking={busy} />
 
         {/* Subtitle */}
         <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
@@ -172,10 +193,10 @@ export default function Login() {
               value={pw}
               onChange={e => setPw(e.target.value)}
               placeholder="••••••••••"
-              disabled={busy}
+              disabled={unlocking}
               style={{ ...inputBase, borderColor: err ? ERR : BORDER, fontSize: 18, letterSpacing: '0.1em' }}
-              onFocus={e  => { e.target.style.borderColor = GOLD }}
-              onBlur={e   => { e.target.style.borderColor = err ? ERR : BORDER }}
+              onFocus={e => { e.target.style.borderColor = GOLD }}
+              onBlur={e  => { e.target.style.borderColor = err ? ERR : BORDER }}
             />
             {err && <div style={{ fontSize: 11, color: ERR, marginTop: 5 }}>{err}</div>}
           </div>
@@ -183,26 +204,40 @@ export default function Login() {
           {/* Submit */}
           <button
             type="submit"
-            disabled={busy}
+            disabled={unlocking}
             style={{
               width: '100%',
-              background: busy ? GOLD_DRK : `linear-gradient(135deg, ${GOLD} 0%, ${GOLD_DRK} 100%)`,
+              background: unlocking ? GOLD_DRK : `linear-gradient(135deg, ${GOLD} 0%, ${GOLD_DRK} 100%)`,
               border: 'none', borderRadius: 8, padding: '0.875rem',
               color: NAVY, fontSize: 12, fontWeight: 700, letterSpacing: '0.18em',
-              fontFamily: 'inherit', cursor: busy ? 'default' : 'pointer',
+              fontFamily: 'inherit', cursor: unlocking ? 'default' : 'pointer',
               boxShadow: `0 4px 24px ${GOLD}38`, transition: 'transform 0.15s, opacity 0.2s',
             }}
-            onMouseEnter={e => { if (!busy) e.currentTarget.style.transform = 'translateY(-1px)' }}
+            onMouseEnter={e => { if (!unlocking) e.currentTarget.style.transform = 'translateY(-1px)' }}
             onMouseLeave={e => { e.currentTarget.style.transform = 'none' }}
           >
-            {busy ? 'UNLOCKING VAULT…' : 'SIGN IN'}
+            {unlocking ? 'UNLOCKING VAULT…' : 'SIGN IN'}
           </button>
         </form>
 
-        {/* Footer */}
+        {/* Footer — inside card, unchanged */}
         <div style={{ textAlign: 'center', marginTop: '1.5rem', fontSize: 9.5, color: TEXT_DIM, opacity: 0.4, letterSpacing: '0.1em' }}>
           ZONE 1 · END-TO-END ENCRYPTED · ISO 27001 ALIGNED
         </div>
+      </div>
+
+      {/*
+       * CHANGE 2: tagline is now a normal-flow flex child (marginTop 30px),
+       * so it always sits clearly below the card and can never overlap it.
+       * Text, gold color, sizing and letter-spacing preserved as specified.
+       */}
+      <div style={{
+        position: 'relative', zIndex: 1,
+        marginTop: 30, textAlign: 'center',
+        fontSize: 12, fontWeight: 600, letterSpacing: '0.08em',
+        color: GOLD, opacity: 0.7,
+      }}>
+        Tokenize the Real World. Unlock Infinite Liquidity.
       </div>
     </div>
   )
