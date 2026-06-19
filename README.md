@@ -9,7 +9,7 @@
 > Issuing a token takes minutes. Proving the asset is legitimate takes weeks.
 > The bottleneck is not the blockchain — it is the coordination of compliance.
 
-Brightuity is an enterprise B2B vendor system for the **Digital Assets & Tokenization Division** of banks and financial institutions. It replaces weeks of fragmented specialist handoffs with a coordinated pipeline of AI agents that runs in minutes. Every agent verdict, every gate decision, and every coordination message passes through Band — making the coordination room itself the immutable audit trail. Final approval always stays with a human: the Head of Digital Assets.
+Brightuity is an enterprise B2B vendor system for the **Digital Assets & Tokenization Division** of banks and financial institutions. It replaces weeks of fragmented specialist handoffs with a coordinated pipeline of AI agents that runs in minutes. Every agent verdict, every gate decision, and every coordination message passes through Band, making the coordination room itself the immutable audit trail. Final approval always stays with a human: the Head of Digital Assets.
 
 **Built for the Band of Agents Hackathon** (lablab.ai, June 2026, Track 3: Regulated & High-Stakes Workflows).
 
